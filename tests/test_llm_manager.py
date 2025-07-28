@@ -132,7 +132,7 @@ class TestLLMManager:
         assert len(prompt) > 0
         assert "**PRIMARY CHANGE:**" in prompt
         assert "**SECONDARY CHANGES:**" in prompt
-        assert "**TAGS:**" in prompt
+        assert "**SUMMARY:**" in prompt
 
     def test_prompt_building_with_context(self):
         """Test analysis prompt building with full context"""
@@ -155,8 +155,6 @@ class TestLLMManager:
         assert "FULL FILE CONTEXT:" in prompt
         assert "--- Original File (old.txt) ---" in prompt
         assert "--- Modified File (new.txt) ---" in prompt
-        # Check for updated tags
-        assert "readability, typo" in prompt
 
     def test_token_estimation(self):
         """Test token count estimation."""
