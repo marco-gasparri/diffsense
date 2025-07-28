@@ -372,9 +372,9 @@ Why were these substantial changes made? What new capabilities or behaviors do t
 **TECHNICAL BENEFITS:**
 Only if there are genuine architectural improvements (performance, reliability, security). Skip if changes are merely organizational.
 
-**TAGS:**
+**SUMMARY:**
 Classification: [Bug Fix | Feature | Refactoring | Maintenance]
-Technical: [database, readability, typo, error-handling, performance, security, concurrency, logging, api-changes, generic]
+Tag: [Database | Readability | Typo | Error-handling | Performance | Security | Concurrency | Logging | Api-changes | Generic][USE ONLY ONE TAG, use 'Generic' if not sure]
 Complexity: [Low | Medium | High]
 Risk: [Low | Medium | High]
 
