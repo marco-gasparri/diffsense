@@ -1,4 +1,4 @@
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .diff_engine import DiffEngine, DiffBlock, LineDiff
 from .llm_manager import LLMManager
