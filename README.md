@@ -118,58 +118,76 @@ diffsense file1 file2 --context 10
 
 ## Example output
 
+```bash
+$ diffsense examples/example_v1.py examples/example_v2.py
 ```
-╭────────────────────────────────────────────────────────────────────────────────── Diff Analysis ──────────────────────────────────────────────────────────────────────────────────╮
-│ --- example_v1.py +++ example_v2.py                                                                                                                                               │
-│ Blocks: 2 | Changes: 11                                                                                                                                                           │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────────── Block 1 (+3, -2) ─────────────────────────────────────────────────────────────────────────────────╮
-│ @@ -1,3 +1,4 @@                                                                                                                                                                   │
-│    1 - def calculate_total(a, b):                                                                                                                                                 │
-│    2 -     return a + b                                                                                                                                                           │
-│    1 + def calculate_total(a, b, fee=0):                                                                                                                                          │
-│    2 +     subtotal = a + b                                                                                                                                                       │
-│    3 +     return subtotal + fee                                                                                                                                                  │
-│    3                                                                                                                                                                              │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────────── Block 2 (+2, -2) ─────────────────────────────────────────────────────────────────────────────────╮
-│ @@ -3,3 +4,3 @@                                                                                                                                                                   │
-│    3                                                                                                                                                                              │
-│    4 - def print_receipt(total):                                                                                                                                                  │
-│    5 -     print(f"Total: {total}")                                                                                                                                               │
-│    5 + def print_receipt(total, currency="$"):                                                                                                                                    │
-│    6 +     print(f"{currency} {total}")                                                                                                                                           │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭───────────────────────────────────────────────────────────────────────────────────── Summary ─────────────────────────────────────────────────────────────────────────────────────╮
-│ + 5 insertions - 4 deletions ~ 0 modifications                                                                                                                                    │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[19:32:46] INFO     Loading model: TheBloke/CodeLlama-7B-Instruct-GGUF                                                                                             llm_manager.py:137
-[19:32:49] INFO     Model loaded successfully                                                                                                                      llm_manager.py:158
 
-────────────────────────────────────────────────────────────────────────────────
-AI Analysis:
-**PRIMARY CHANGE:**
-The most substantial change that introduces new functionality, logic, or architecture is the addition of a new parameter `fee` to the `calculate_total` function. This change allows 
-for the calculation of a fee to be added to the total, which was not possible before.
+<pre>
+┌──────────────────────── <b>Diff Analysis</b> ─────────────────────────┐
+│ <span style="color:#e74c3c"><b>---</b></span> example_v1.py <span style="color:#27ae60"><b>+++</b></span> example_v2.py                            │
+│ Blocks: 2 | Changes: 11                                        │
+└────────────────────────────────────────────────────────────────┘
 
-**SECONDARY CHANGES:**
-The addition of the `fee` parameter also allows for the calculation of the subtotal, which was previously hardcoded. This change makes the `calculate_total` function more flexible 
-and allows for more complex calculations.
+┌─────────────────────── <b>Block 1</b> (<span style="color:#27ae60">+3</span>, <span style="color:#e74c3c">-2</span>) ───────────────────────┐
+│ <span style="color:#3498db"><b>@@ -1,3 +1,4 @@</b></span>                                                │
+│   <span style="color:#95a5a6">1</span> <span style="color:#e74c3c">- def calculate_total(a, b):</span>                               │
+│   <span style="color:#95a5a6">2</span> <span style="color:#e74c3c">-     return a + b</span>                                         │
+│   <span style="color:#95a5a6">1</span> <span style="color:#27ae60">+ def calculate_total(a, b, fee=0):</span>                        │
+│   <span style="color:#95a5a6">2</span> <span style="color:#27ae60">+     subtotal = a + b</span>                                     │
+│   <span style="color:#95a5a6">3</span> <span style="color:#27ae60">+     return subtotal + fee</span>                                │
+│   <span style="color:#95a5a6">3</span>                                                            │
+└────────────────────────────────────────────────────────────────┘
 
-**PURPOSE & IMPACT:**
-The purpose of this change is to allow for the calculation of a fee to be added to the total, which was not possible before. This change enables the system to handle more complex 
-transactions and to provide more accurate receipts.
+┌─────────────────────── <b>Block 2</b> (<span style="color:#27ae60">+2</span>, <span style="color:#e74c3c">-2</span>) ───────────────────────┐
+│ <span style="color:#3498db"><b>@@ -3,3 +4,3 @@</b></span>                                                │
+│   <span style="color:#95a5a6">4</span>                                                            │
+│   <span style="color:#95a5a6">5</span> <span style="color:#e74c3c">- def print_receipt(total):</span>                                │
+│   <span style="color:#95a5a6">6</span> <span style="color:#e74c3c">-     print(f"Total: {total}")</span>                             │
+│   <span style="color:#95a5a6">5</span> <span style="color:#27ae60">+ def print_receipt(total, currency="$"):</span>                  │
+│   <span style="color:#95a5a6">6</span> <span style="color:#27ae60">+     print(f"{currency} {total}")</span>                         │
+└────────────────────────────────────────────────────────────────┘
 
-**TECHNICAL BENEFITS:**
-The addition of the `fee` parameter and the calculation of the subtotal allow for more flexible and complex calculations, which can improve the performance and reliability of the 
-system.
+┌─────────────────────────── <b>Summary</b> ───────────────────────────┐
+│ <span style="color:#27ae60">+ 3 insertions</span> <span style="color:#e74c3c">- 2 deletions</span> <span style="color:#f39c12">~ 0 modifications</span>                │
+└───────────────────────────────────────────────────────────────┘
 
-**TAGS:**
+<span style="color:#3498db">[19:32:46]</span> <span style="color:#2ecc71"><b>INFO</b></span>    Loading model: TheBloke/CodeLlama-7B-Instruct-GGUF
+<span style="color:#3498db">[19:32:49]</span> <span style="color:#2ecc71"><b>INFO</b></span>    Model loaded successfully
+
+────────────────────────────────────────────────────────────────────
+<span style="color:#f1c40f"><b>AI Analysis:</b></span>
+
+<b>PRIMARY CHANGE:</b>
+The most substantial change that introduces new functionality,
+logic, or architecture is the addition of a new parameter `fee`
+to the `calculate_total` function. This change allows for the 
+calculation of a fee to be added to the total, which was not
+possible before.
+
+<b>SECONDARY CHANGES:</b>
+The addition of the `fee` parameter also allows for the
+calculation of taxes and other fees that may be applicable to a
+transaction. Additionally, the `print_receipt` function now
+takes an additional parameter `currency` to specify the currency
+symbol to be used in the receipt.
+
+<b>PURPOSE & IMPACT:</b>
+The purpose of these changes is to enable the calculation of
+fees and taxes in the receipt, and to allow for the use of
+different currencies in the receipt.
+
+<b>TECHNICAL BENEFITS:</b>
+The addition of the `fee` parameter and the `print_receipt`
+function with the `currency` parameter allow for more flexible
+and customizable receipts, which can be useful for different
+types of transactions and businesses.
+
+<b>SUMMARY:</b>
 Classification: Feature
-Technical: performance, readability, error-handling
+Tag: Generic
 Complexity: Medium
-Risk: Low
-```
+Risk: Medium
+</pre>
 
 ## Project structure
 
