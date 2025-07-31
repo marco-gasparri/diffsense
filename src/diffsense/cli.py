@@ -5,7 +5,7 @@ Command Line Interface for DiffSense
 import sys
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import typer
 from rich.console import Console
@@ -14,7 +14,8 @@ from rich.logging import RichHandler
 from .diff_engine import DiffEngine
 from .llm_manager import LLMManager
 from .formatter import DiffFormatter
-from .exceptions import DiffSenseError
+from .git_manager import GitManager
+from .exceptions import DiffSenseError, GitError
 
 # Configure logging
 logging.basicConfig(
@@ -27,7 +28,7 @@ logger = logging.getLogger("diffsense")
 
 app = typer.Typer(
     name="diffsense",
-    help="AI-powered code diff tool",
+    help="AI-powered code diff tool with Git integration",
     no_args_is_help=True,
 )
 console = Console()
@@ -43,8 +44,14 @@ def version_callback(value: bool) -> None:
 
 @app.command()
 def main(
-    file1: Path = typer.Argument(..., help="First file to compare"),
-    file2: Path = typer.Argument(..., help="Second file to compare"),
+    file1: Optional[Path] = typer.Argument(None, help="First file to compare (or Git reference with --git)"),
+    file2: Optional[Path] = typer.Argument(None, help="Second file to compare (or Git reference/file with --git)"),
+    git_args: Optional[List[str]] = typer.Argument(None, help="Additional Git arguments"),
+    git: bool = typer.Option(
+        False,
+        "--git",
+        help="Git mode: compare commits, branches, or working directory"
+    ),
     model: Optional[str] = typer.Option(
         None,
         "--model",
@@ -87,61 +94,10 @@ def main(
         logger.debug("Verbose mode enabled")
 
     try:
-        # Validate input files
-        _validate_files(file1, file2)
-
-        # Read file contents
-        logger.debug(f"Reading files: {file1} and {file2}")
-        original_content = file1.read_text(encoding='utf-8')
-        modified_content = file2.read_text(encoding='utf-8')
-
-        # Compute diff
-        logger.debug("Computing diff...")
-        diff_engine = DiffEngine(context_lines=context)
-        diff_blocks = diff_engine.compute_diff(original_content, modified_content)
-
-        if not diff_blocks:
-            console.print("[green]No differences found between files.[/green]")
-            return
-
-        # Format and display diff
-        formatter = DiffFormatter()
-        formatted_diff = formatter.format_diff(diff_blocks, file1.name, file2.name)
-        console.print(formatted_diff)
-
-        # Generate AI analysis if requested
-        if not no_ai:
-            logger.debug("Generating AI analysis...")
-            try:
-                llm_manager = LLMManager(model_id=model)
-
-                # Decide whether to include full context
-                should_include_context = full_context or _should_include_full_context(file1, file2)
-
-                if should_include_context:
-                    logger.debug("Attempting AI analysis with full file context")
-                    analysis = llm_manager.analyze_diff(
-                        diff_blocks,
-                        original_content=original_content,
-                        modified_content=modified_content,
-                        file1_name=file1.name,
-                        file2_name=file2.name
-                    )
-                else:
-                    if full_context:
-                        logger.info("Files too large for full context analysis, using diff-only mode")
-                    analysis = llm_manager.analyze_diff(diff_blocks)
-
-                console.print("\n" + "─" * 80)
-                console.print("[bold yellow]AI Analysis:[/bold yellow]")
-                console.print(analysis)
-
-            except Exception as e:
-                logger.warning(f"AI analysis failed: {e}")
-                console.print(
-                    "\n[yellow]Warning: AI analysis unavailable. "
-                    "Run with --no-ai to suppress this message.[/yellow]"
-                )
+        if git:
+            _handle_git_mode(file1, file2, git_args, model, no_ai, full_context, context, verbose)
+        else:
+            _handle_file_mode(file1, file2, model, no_ai, full_context, context, verbose)
 
     except DiffSenseError as e:
         logger.error(f"DiffSense error: {e}")
@@ -153,36 +109,238 @@ def main(
         raise typer.Exit(code=1)
 
 
+def _handle_git_mode(
+    file1: Optional[Path],
+    file2: Optional[Path],
+    git_args: Optional[List[str]],
+    model: Optional[str],
+    no_ai: bool,
+    full_context: bool,
+    context: int,
+    verbose: bool
+) -> None:
+    """
+    Handle Git mode operations
+    """
+    logger.debug("Git mode enabled")
+
+    # Collect all arguments for Git mode
+    args = []
+    if file1:
+        args.append(str(file1))
+    if file2:
+        args.append(str(file2))
+    if git_args:
+        args.extend(git_args)
+
+    if not args:
+        raise DiffSenseError("Git mode requires at least one reference (e.g., --git HEAD)")
+
+    # Initialize Git manager
+    try:
+        git_manager = GitManager()
+    except GitError as e:
+        raise DiffSenseError(f"Git initialization failed: {e}")
+
+    # Validate and parse Git arguments
+    try:
+        ref1, ref2, file_path = git_manager.validate_git_mode(args)
+        logger.debug(f"Git mode parsed: ref1={ref1}, ref2={ref2}, file_path={file_path}")
+    except GitError as e:
+        raise DiffSenseError(f"Invalid Git arguments: {e}")
+
+    # Handle case where no file is specified
+    if file_path is None and ref1 is not None and ref2 is None:
+        # Show changed files for single ref
+        try:
+            changed_files = git_manager.get_changed_files(ref1, None)
+            if not changed_files:
+                console.print(f"[green]No changes found between {ref1} and working directory.[/green]")
+                return
+
+            console.print(f"\n[bold]Changed files between {ref1} and working directory:[/bold]")
+            for file in changed_files:
+                console.print(f"  • {file}")
+            console.print(f"\n[dim]To see changes for a specific file, use: diffsense --git {ref1} <filename>[/dim]")
+            return
+        except GitError as e:
+            raise DiffSenseError(f"Failed to get changed files: {e}")
+
+    # Create temporary files and run diff
+    try:
+        with git_manager.create_temp_files(ref1, ref2, file_path) as (temp_file1, temp_file2):
+            # Format file labels for display
+            if file_path:
+                label1 = git_manager.format_file_label(file_path, ref1)
+                label2 = git_manager.format_file_label(file_path, ref2)
+            else:
+                # For full repository diffs (future enhancement)
+                label1 = f"Commit {ref1}" if ref1 else "Working Directory"
+                label2 = f"Commit {ref2}" if ref2 else "Working Directory"
+
+            logger.debug(f"Comparing: {label1} vs {label2}")
+
+            # Read file contents
+            original_content = temp_file1.read_text(encoding='utf-8')
+            modified_content = temp_file2.read_text(encoding='utf-8')
+
+            # Run the diff analysis
+            _run_diff_analysis(
+                original_content=original_content,
+                modified_content=modified_content,
+                file1_name=label1,
+                file2_name=label2,
+                context_lines=context,
+                model=model,
+                no_ai=no_ai,
+                full_context=full_context,
+                verbose=verbose
+            )
+
+    except GitError as e:
+        raise DiffSenseError(f"Git operation failed: {e}")
+
+
+def _handle_file_mode(
+    file1: Optional[Path],
+    file2: Optional[Path],
+    model: Optional[str],
+    no_ai: bool,
+    full_context: bool,
+    context: int,
+    verbose: bool
+) -> None:
+    """
+    Handle traditional file mode operations
+    """
+    if not file1 or not file2:
+        raise DiffSenseError("Two file paths are required in file mode")
+
+    # Validate input files
+    _validate_files(file1, file2)
+
+    # Read file contents
+    logger.debug(f"Reading files: {file1} and {file2}")
+    original_content = file1.read_text(encoding='utf-8')
+    modified_content = file2.read_text(encoding='utf-8')
+
+    # Run the diff analysis
+    _run_diff_analysis(
+        original_content=original_content,
+        modified_content=modified_content,
+        file1_name=file1.name,
+        file2_name=file2.name,
+        context_lines=context,
+        model=model,
+        no_ai=no_ai,
+        full_context=full_context,
+        verbose=verbose
+    )
+
+
+def _run_diff_analysis(
+    original_content: str,
+    modified_content: str,
+    file1_name: str,
+    file2_name: str,
+    context_lines: int,
+    model: Optional[str],
+    no_ai: bool,
+    full_context: bool,
+    verbose: bool
+) -> None:
+    """
+    Run the core diff analysis and display results
+
+    This is the common logic shared between file and Git modes
+    """
+    # Compute diff
+    logger.debug("Computing diff...")
+    diff_engine = DiffEngine(context_lines=context_lines)
+    diff_blocks = diff_engine.compute_diff(original_content, modified_content)
+
+    if not diff_blocks:
+        console.print("[green]No differences found between files.[/green]")
+        return
+
+    # Format and display diff
+    formatter = DiffFormatter()
+    formatted_diff = formatter.format_diff(diff_blocks, file1_name, file2_name)
+    console.print(formatted_diff)
+
+    # Generate AI analysis if requested
+    if not no_ai:
+        logger.debug("Generating AI analysis...")
+        try:
+            llm_manager = LLMManager(model_id=model)
+
+            # Decide whether to include full context
+            should_include_context = full_context or _should_include_full_context_from_content(
+                original_content, modified_content
+            )
+
+            if should_include_context:
+                logger.debug("Attempting AI analysis with full file context")
+                analysis = llm_manager.analyze_diff(
+                    diff_blocks,
+                    original_content=original_content,
+                    modified_content=modified_content,
+                    file1_name=file1_name,
+                    file2_name=file2_name
+                )
+            else:
+                if full_context:
+                    logger.info("Files too large for full context analysis, using diff-only mode")
+                analysis = llm_manager.analyze_diff(diff_blocks)
+
+            console.print("\n" + "─" * 80)
+            console.print("[bold yellow]AI Analysis:[/bold yellow]")
+            console.print(analysis)
+
+        except Exception as e:
+            logger.warning(f"AI analysis failed: {e}")
+            console.print(
+                "\n[yellow]Warning: AI analysis unavailable. "
+                "Run with --no-ai to suppress this message.[/yellow]"
+            )
+
+
 def _should_include_full_context(file1: Path, file2: Path) -> bool:
     """
     Decide if files are small enough to include full context in AI analysis.
     """
-    max_lines = 80
-    max_chars = 3000  # Additional character limit
-
     try:
         content1 = file1.read_text(encoding='utf-8')
         content2 = file2.read_text(encoding='utf-8')
-
-        lines1 = len(content1.splitlines())
-        lines2 = len(content2.splitlines())
-        chars1 = len(content1)
-        chars2 = len(content2)
-
-        max_file_lines = max(lines1, lines2)
-        max_file_chars = max(chars1, chars2)
-
-        logger.debug(f"File sizes: {file1.name}={lines1} lines ({chars1} chars), {file2.name}={lines2} lines ({chars2} chars)")
-        logger.debug(f"Limits: {max_lines} lines, {max_chars} chars")
-
-        # Both conditions must be met
-        size_ok = max_file_lines <= max_lines and max_file_chars <= max_chars
-        logger.debug(f"Decision: {size_ok}")
-
-        return size_ok
+        return _should_include_full_context_from_content(content1, content2)
     except Exception as e:
         logger.debug(f"Could not determine file sizes: {e}")
         return False
+
+
+def _should_include_full_context_from_content(content1: str, content2: str) -> bool:
+    """
+    Decide if content is small enough to include full context in AI analysis.
+    """
+    max_lines = 100
+    max_chars = 5000  # Additional character limit
+
+    lines1 = len(content1.splitlines())
+    lines2 = len(content2.splitlines())
+    chars1 = len(content1)
+    chars2 = len(content2)
+
+    max_file_lines = max(lines1, lines2)
+    max_file_chars = max(chars1, chars2)
+
+    logger.debug(f"Content sizes: {lines1} lines ({chars1} chars), {lines2} lines ({chars2} chars)")
+    logger.debug(f"Limits: {max_lines} lines, {max_chars} chars")
+
+    # Both conditions must be met
+    size_ok = max_file_lines <= max_lines and max_file_chars <= max_chars
+    logger.debug(f"Decision: {size_ok}")
+
+    return size_ok
 
 
 def _validate_files(file1: Path, file2: Path) -> None:

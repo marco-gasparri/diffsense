@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
-An AI-powered code diff analysis tool that provides intelligent insights into code changes using local language models. DiffSense goes beyond traditional diff tools by understanding the architectural and behavioral significance of modifications, helping developers focus on what truly matters.
+An AI-powered code diff analysis tool that provides intelligent insights into code changes using local language models. DiffSense goes beyond traditional diff tools by understanding the architectural and behavioral significance of modifications, helping developers focus on what truly matters. It provides also a Git integration for analyzing commits and working directory changes.
 
 ## Core concept
 
@@ -37,6 +37,10 @@ Traditional diff tools show *what* changed but not *why* it matters. DiffSense l
 - **Local processing**: no external API calls or data transmission
 - **Offline models**: downloads and caches models locally
 - **Hardware optimization**: automatic GPU acceleration when available
+
+### Git integration
+- **Commit comparison**: analyze changes between any two commits
+- **Working directory diffs**: compare uncommitted changes against any commit
 
 ## Installation
 
@@ -71,6 +75,29 @@ diffsense file1 file2 --no-ai
 
 # Include full file context for better analysis
 diffsense file1 file2 --full-context
+```
+
+### Git Integration
+```bash
+
+# Basic syntax
+diffsense --git <ref1> [<ref2>] [<file>]
+
+# Compare working directory changes against HEAD
+diffsense --git HEAD src/file.py
+
+# Compare specific file between commits
+diffsense --git main feature-branch src/file.py
+
+# Compare working directory against specific commit
+diffsense --git HEAD~1 src/file.py
+
+# Compare file between commits
+diffsense --git abc123 def456 src/file.py   
+
+# Compare file between branches
+diffsense --git main dev src/file.py  
+
 ```
 
 ### Advanced Options
@@ -198,12 +225,15 @@ diffsense/
 │   ├── cli.py                   # Command-line interface
 │   ├── diff_engine.py           # Core diff computation
 │   ├── formatter.py             # Rich text formatting
+│   ├── git_manager.py           # Git integration
 │   ├── llm_manager.py           # AI model management
 │   └── exceptions.py            # Custom exceptions
 ├── tests/
 │   ├── test_cli.py              # CLI functionality tests
+│   ├── test_cli_git.py          # Git mode CLI tests
 │   ├── test_diff_engine.py      # Diff engine tests
 │   ├── test_formatter.py        # Formatter tests
+│   ├── test_git_manager.py      # Git manager tests
 │   └── test_llm_manager.py      # LLM manager tests
 ├── examples/
 │   ├── example_v1.py            # Example file1
@@ -250,6 +280,13 @@ To support new output formats:
 1. Extend `src/diffsense/formatter.py`
 2. Add new formatting methods
 3. Update CLI options in `src/diffsense/cli.py`
+
+#### Extending Git integration
+To add new Git features:
+
+1. Modify `src/diffsense/git_manager.py`
+2. Add tests in `tests/test_git_manager.py`
+3. Update CLI in `src/diffsense/cli.py` if needed
 
 ## Performance considerations
 
@@ -302,6 +339,7 @@ DiffSense employs a modular architecture with clear separation of concerns:
 
 - **Diff Engine**: implements advanced diff algorithms with inline change detection
 - **LLM Manager**: handles model lifecycle, hardware optimization, and prompt engineering  
+- **Git Manager**: provides Git integration to retrieve file diffs from commits data
 - **Formatter**: provides rich terminal output with syntax highlighting
 - **CLI**: offers comprehensive command-line interface with extensive options
 

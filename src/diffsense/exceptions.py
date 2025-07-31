@@ -21,3 +21,8 @@ class DiffError(DiffSenseError):
 class FormattingError(DiffSenseError):
     """Issues formatting output"""
     pass
+
+
+class GitError(DiffSenseError):
+    """Issues with Git operations"""
+    pass
