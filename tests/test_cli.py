@@ -2,10 +2,12 @@
 Tests for the CLI functionality
 """
 
+import os
+import sys
 import pytest
 from pathlib import Path
 from typer.testing import CliRunner
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, MagicMock
 
 from diffsense.cli import app
 from diffsense.exceptions import DiffSenseError
@@ -176,3 +178,50 @@ class TestCLI:
         result = self.runner.invoke(app, ["--version"])
         assert result.exit_code == 0
         assert "DiffSense" in result.stdout or "version" in result.stdout.lower()
+
+    def test_anthropic_model_option(self):
+        """Test --model anthropic option"""
+        mock_anthropic = MagicMock()
+
+        with patch.dict(os.environ, {"DIFFSENSE_ANTHROPIC_API_KEY": "test-key"}):
+            with patch('diffsense.cli.LLMManager') as mock_manager:
+                with patch.dict(sys.modules, {'anthropic': mock_anthropic}):
+                    mock_manager.return_value.analyze_diff.return_value = "Anthropic analysis"
+
+                    result = self.runner.invoke(app, [
+                        str(self.file1), str(self.file2),
+                        "--model", "anthropic"
+                    ])
+
+                    assert result.exit_code == 0
+                    mock_manager.assert_called_with(model_id="anthropic")
+
+    def test_openai_model_option(self):
+        """Test --model openai option"""
+        mock_openai = MagicMock()
+
+        with patch.dict(os.environ, {"DIFFSENSE_OPENAI_API_KEY": "test-key"}):
+            with patch('diffsense.cli.LLMManager') as mock_manager:
+                with patch.dict(sys.modules, {'openai': mock_openai}):
+                    mock_manager.return_value.analyze_diff.return_value = "OpenAI analysis"
+
+                    result = self.runner.invoke(app, [
+                        str(self.file1), str(self.file2),
+                        "--model", "openai"
+                    ])
+
+                    assert result.exit_code == 0
+                    mock_manager.assert_called_with(model_id="openai")
+
+    def test_remote_model_without_api_key(self):
+        """Test remote model without API key shows error"""
+        with patch.dict(os.environ, {}, clear=True):
+            result = self.runner.invoke(app, [
+                str(self.file1), str(self.file2),
+                "--model", "anthropic"
+            ])
+
+            # The current implementation shows a warning but continues with exit code 0
+            # This is because the error is caught and handled gracefully
+            assert result.exit_code == 0
+            assert "Warning: AI analysis unavailable" in result.stdout

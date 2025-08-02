@@ -2,6 +2,8 @@
 Tests for the LLM manager functionality
 """
 
+import os
+import sys
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
@@ -9,6 +11,7 @@ from pathlib import Path
 from diffsense.llm_manager import LLMManager
 from diffsense.diff_engine import DiffEngine
 from diffsense.exceptions import ModelError
+from diffsense.diff_engine import DiffBlock
 
 
 class TestLLMManager:
@@ -61,7 +64,9 @@ class TestLLMManager:
         assert "max_tokens" in info
         assert "temperature" in info
         assert "loaded" in info
+        assert "provider" in info
         assert info["loaded"] is False
+        assert info["provider"] == "local"
 
     @pytest.mark.slow
     @pytest.mark.network
@@ -319,3 +324,77 @@ class TestLLMManager:
                         assert "n_ctx" in params
                         assert "n_threads" in params
                         assert params["n_threads"] <= 8  # Reasonable limit
+
+    def test_anthropic_model_initialization(self):
+        """Test initialization with Anthropic model"""
+        mock_anthropic = MagicMock()
+
+        with patch.dict(os.environ, {"DIFFSENSE_ANTHROPIC_API_KEY": "test-key"}):
+            with patch.dict(sys.modules, {'anthropic': mock_anthropic}):
+                manager = LLMManager(model_id="anthropic", cache_dir=self.temp_cache)
+                assert manager.model_id == "anthropic"
+
+                info = manager.get_model_info()
+                assert info["provider"] == "anthropic"
+                assert info["api_key_set"] is True
+
+    def test_openai_model_initialization(self):
+        """Test initialization with OpenAI model"""
+        mock_openai = MagicMock()
+
+        with patch.dict(os.environ, {"DIFFSENSE_OPENAI_API_KEY": "test-key"}):
+            with patch.dict(sys.modules, {'openai': mock_openai}):
+                manager = LLMManager(model_id="openai", cache_dir=self.temp_cache)
+                assert manager.model_id == "openai"
+
+                info = manager.get_model_info()
+                assert info["provider"] == "openai"
+                assert info["api_key_set"] is True
+
+    def test_remote_model_without_api_key(self):
+        """Test remote model initialization without API key"""
+        with patch.dict(os.environ, {}, clear=True):
+            manager = LLMManager(model_id="anthropic", cache_dir=self.temp_cache)
+
+            with pytest.raises(ModelError, match="Anthropic API key not found"):
+                manager.analyze_diff([DiffBlock(1, 1, 1, 1, [])])
+
+    @patch('diffsense.model_providers.AnthropicProvider')
+    def test_analyze_diff_with_anthropic(self, mock_anthropic_provider):
+        """Test diff analysis with Anthropic provider"""
+        # Setup mock
+        mock_provider_instance = Mock()
+        mock_provider_instance.is_available.return_value = True
+        mock_provider_instance.generate.return_value = "Anthropic analysis"
+        mock_anthropic_provider.return_value = mock_provider_instance
+
+        with patch.dict(os.environ, {"DIFFSENSE_ANTHROPIC_API_KEY": "test-key"}):
+            manager = LLMManager(model_id="anthropic", cache_dir=self.temp_cache)
+
+            # Create sample diff
+            engine = DiffEngine()
+            blocks = engine.compute_diff("old", "new")
+
+            result = manager.analyze_diff(blocks)
+            assert result == "Anthropic analysis"
+            mock_provider_instance.generate.assert_called_once()
+
+    @patch('diffsense.model_providers.OpenAIProvider')
+    def test_analyze_diff_with_openai(self, mock_openai_provider):
+        """Test diff analysis with OpenAI provider"""
+        # Setup mock
+        mock_provider_instance = Mock()
+        mock_provider_instance.is_available.return_value = True
+        mock_provider_instance.generate.return_value = "OpenAI analysis"
+        mock_openai_provider.return_value = mock_provider_instance
+
+        with patch.dict(os.environ, {"DIFFSENSE_OPENAI_API_KEY": "test-key"}):
+            manager = LLMManager(model_id="openai", cache_dir=self.temp_cache)
+
+            # Create sample diff
+            engine = DiffEngine()
+            blocks = engine.compute_diff("old", "new")
+
+            result = manager.analyze_diff(blocks)
+            assert result == "OpenAI analysis"
+            mock_provider_instance.generate.assert_called_once()

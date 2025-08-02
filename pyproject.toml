@@ -41,6 +41,10 @@ dev = [
     "pytest-cov>=4.0.0",
     "mypy>=1.0.0",
 ]
+remote = [
+    "anthropic>=0.18.0",
+    "openai>=1.10.0",
+]
 
 [project.scripts]
 diffsense = "diffsense.cli:app"

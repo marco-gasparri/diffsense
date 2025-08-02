@@ -18,6 +18,7 @@ from llama_cpp import Llama
 from .diff_engine import DiffBlock
 from .formatter import DiffFormatter
 from .exceptions import ModelError
+from .model_providers import create_provider, ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class LLMManager:
 
         self.cache_dir.mkdir(exist_ok=True)
         self._model_instance: Optional[Llama] = None
+        self._provider: Optional[ModelProvider] = None
         self._formatter = DiffFormatter()
 
     def analyze_diff(
@@ -71,9 +73,9 @@ class LLMManager:
             return "No changes detected in the provided files"
 
         try:
-            # Load model if not already loaded
-            if self._model_instance is None:
-                self._model_instance = self._load_model()
+            # Initialize provider if not already done
+            if self._provider is None:
+                self._initialize_provider()
 
             # Generate prompt with optional context
             prompt = self._build_analysis_prompt(
@@ -84,7 +86,7 @@ class LLMManager:
                 file2_name=file2_name
             )
 
-            # Run inference
+            # Run inference through provider
             response = self._run_inference(prompt)
 
             return response
@@ -98,6 +100,20 @@ class LLMManager:
         Uses approximate ratio: 1 token ≈ 4 characters for English text (needs improvements)
         """
         return len(text) // 4  # Conservative estimate
+
+    def _initialize_provider(self) -> None:
+        """
+        Initialize the appropriate model provider based on model_id
+        """
+        # Check if it's a remote model
+        if self.model_id in ["anthropic", "openai"]:
+            logger.info(f"Initializing {self.model_id} provider")
+            self._provider = create_provider(self.model_id)
+        else:
+            # Local model - load it first
+            if self._model_instance is None:
+                self._model_instance = self._load_model()
+            self._provider = create_provider(self.model_id, self._model_instance)
 
     def _load_model(self) -> Llama:
         """
@@ -391,36 +407,29 @@ MANDATORY RULES:
         Run inference on the loaded model
         """
         try:
-            if self._model_instance is None:
-                raise ModelError("Model not loaded")
+            if self._provider is None:
+                raise ModelError("Provider not initialized")
 
             logger.debug("Running model inference")
 
-            # Create chat completion
-            response = self._model_instance.create_chat_completion(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a senior software engineer providing concise, professional code review analysis"
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
+            # Create messages in standard format
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a senior software engineer providing concise, professional code review analysis"
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+
+            # Delegate to provider
+            content = self._provider.generate(
+                messages=messages,
                 max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stop=["Human:", "Assistant:", "###"],  # Stop sequences
+                temperature=self.temperature
             )
-
-            # Extract response text
-            if "choices" not in response or not response["choices"]:
-                raise ModelError("Empty response from model")
-
-            content = response["choices"][0]["message"]["content"].strip()
-
-            if not content:
-                raise ModelError("Model returned empty content")
 
             logger.debug("Model inference completed successfully")
             return content
@@ -441,10 +450,19 @@ MANDATORY RULES:
         Get information about the currently configured model
         Returns a dictionary with model information
         """
-        return {
+        info = {
             "model_id": self.model_id,
             "cache_dir": str(self.cache_dir),
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
-            "loaded": self._model_instance is not None,
+            "loaded": self._model_instance is not None or self._provider is not None,
         }
+
+        # Add provider-specific info
+        if self.model_id in ["anthropic", "openai"]:
+            info["provider"] = self.model_id
+            info["api_key_set"] = bool(os.environ.get(f"DIFFSENSE_{self.model_id.upper()}_API_KEY"))
+        else:
+            info["provider"] = "local"
+
+        return info

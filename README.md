@@ -4,362 +4,202 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+An AI-powered code diff analysis tool that understands the *why* behind code changes. DiffSense uses AI models (local or cloud-based) to provide intelligent insights, helping developers focus on what truly matters in code reviews.
 
-An AI-powered code diff analysis tool that provides intelligent insights into code changes using local language models. DiffSense goes beyond traditional diff tools by understanding the architectural and behavioral significance of modifications, helping developers focus on what truly matters. It provides also a Git integration for analyzing commits and working directory changes.
+## Why DiffSense?
 
-## Core concept
+Traditional diff tools show *what* changed but not *why* it matters. DiffSense:
+- **Identifies architectural patterns** and their impact
+- **Prioritizes substantial changes** over cosmetic ones
+- **Provides context-aware analysis** using AI
+- **Supports both local and cloud models** for flexibility
 
-Traditional diff tools show *what* changed but not *why* it matters. DiffSense leverages local AI models to:
-
-- **Identify architectural patterns**: recognizes database transactions, error handling, security improvements
-- **Prioritize substantial changes**: focuses on logic modifications over cosmetic changes  
-- **Provide intelligent context**: uses smart context extraction for better analysis
-- **Maintain privacy**: runs completely offline with local models
-
-## Key features
-
-### Intelligent analysis
-- **Pattern recognition**: automatically detects flow modifications, concurrency patterns, security implementations, etc.
-- **Change prioritization**: distinguishes between substantial logic changes and cosmetic modifications
-- **Architectural insights**: understands the broader impact of code modifications
-
-### Smart context management
-- **Automatic context**: includes full file context for small files (< 80 lines, < 3000 chars)
-- **Smart context**: extracts relevant sections around changes for larger files
-- **Token-aware**: dynamically adjusts context to fit model limitations
-
-### Professional output
-- **Rich terminal display**: syntax-highlighted diff with professional formatting
-- **Structured analysis**: consistent categorization with technical tags
-- **Configurable context**: adjustable context lines around changes
-
-### Privacy-first design
-- **Local processing**: no external API calls or data transmission
-- **Offline models**: downloads and caches models locally
-- **Hardware optimization**: automatic GPU acceleration when available
-
-### Git integration
-- **Commit comparison**: analyze changes between any two commits
-- **Working directory diffs**: compare uncommitted changes against any commit
-
-## Installation
-
-### Prerequisites
-- Python 3.9 or higher
-- 4GB+ RAM recommended for model execution
-- 5GB+ disk space for model cache
-
-### Install from source
-```bash
-git clone https://github.com/marco-gasparri/diffsense.git
-cd diffsense
-pip install -e .
-```
-
-### Development installation
-```bash
-git clone https://github.com/marco-gasparri/diffsense.git
-cd diffsense
-pip install -e ".[dev]"
-```
+![DiffSense screenshot](/docs/screen.jpg?raw=true "DiffSense screenshot")
 
 ## Quick Start
 
-### Basic Usage
 ```bash
-# Compare two files with AI analysis of the diffs
+# Install
+pip install -e .
+
+# Basic usage
 diffsense file1 file2
 
-# Skip AI analysis for faster results
+# Git integration
+diffsense --git HEAD~1 file
+
+# Use Anthropic API
+export DIFFSENSE_ANTHROPIC_API_KEY="your-key"
+diffsense file1 file2 --model anthropic
+
+# Use OpenAI API
+export DIFFSENSE_OPENAI_API_KEY="your-api-key"
+diffsense file1 file2 --model openai
+```
+
+## Features
+
+- **AI Analysis**: understands code changes using LLMs (local or cloud)
+- **Git Integration**: analyze commits and working directory changes
+- **Privacy Options**: choose between local models (offline) or cloud APIs
+- **Smart Context**: automatically manages context for optimal analysis
+
+## Installation
+
+```bash
+# Basic installation
+git clone https://github.com/marco-gasparri/diffsense.git
+cd diffsense
+pip install -e .
+
+# With cloud model support
+pip install -e ".[remote]"
+
+# Development setup
+pip install -e ".[dev]"
+```
+
+## Usage Examples
+
+### File Comparison
+```bash
+# Compare two files
+diffsense file1 file2
+
+# Skip AI analysis
 diffsense file1 file2 --no-ai
 
-# Include full file context for better analysis
-diffsense file1 file2 --full-context
+# More context lines
+diffsense file1 file2 --context 10
 ```
 
 ### Git Integration
 ```bash
+# Compare with previous commit
+diffsense --git HEAD~1 file
 
-# Basic syntax
-diffsense --git <ref1> [<ref2>] [<file>]
+# Compare branches
+diffsense --git main feature-branch file
 
-# Compare working directory changes against HEAD
-diffsense --git HEAD src/file.py
-
-# Compare specific file between commits
-diffsense --git main feature-branch src/file.py
-
-# Compare working directory against specific commit
-diffsense --git HEAD~1 src/file.py
-
-# Compare file between commits
-diffsense --git abc123 def456 src/file.py   
-
-# Compare file between branches
-diffsense --git main dev src/file.py  
-
+# List changed files
+diffsense --git HEAD
 ```
 
-### Advanced Options
-```bash
-# Adjust context lines around changes
-diffsense file1 file2 --context 5
+### Model selection: local models (default)
 
-# Use a custom model
-diffsense file1 file2 --model TheBloke/CodeLlama-13B-Instruct-GGUF
-
-# Enable verbose logging
-diffsense file1 file2 --verbose
-```
-
-## Configuration
-
-### Model selection
-DiffSense uses CodeLlama-7B-Instruct by default, optimized for code analysis. You can specify alternative models from [HuggingFace](https://huggingface.co/):
+DiffSense uses CodeLlama-7B-Instruct by default. Models are downloaded automatically and cached locally in `./models` directory.
 
 ```bash
-# Use a larger model for better analysis
+# Default model
+diffsense file1 file2
+
+# Specific HuggingFace model
 diffsense file1 file2 --model TheBloke/CodeLlama-13B-Instruct-GGUF
 
-# Use a general-purpose model
+# General purpose model
 diffsense file1 file2 --model TheBloke/Llama-2-7B-Chat-GGUF
 ```
 
-### Hardware optimization
-DiffSense automatically optimizes for your hardware:
-- **Apple Silicon**: uses Metal acceleration
-- **NVIDIA GPUs**: automatic CUDA detection
-- **CPU-only**: optimized threading for maximum performance
+**Requirements**:
+- 4GB+ RAM for 7B models
+- 8GB+ RAM for 13B models
+- GPU acceleration automatic on Apple Silicon and CUDA-enabled systems
 
-### Context modes
+### Model selection: cloud models
+
+For enhanced analysis with cloud-based models:
+
+#### Anthropic
 ```bash
-# Automatic context selection (recommended)
-diffsense file1 file2
-
-# Force full file context
-diffsense file1 file2 --full-context
-
-# Adjust diff context lines
-diffsense file1 file2 --context 10
+export DIFFSENSE_ANTHROPIC_API_KEY="your-api-key"
+diffsense file1 file2 --model anthropic
 ```
+Uses Claude Opus 4, the best-in-class Anthropic model.
 
-## Example output
-
+#### OpenAI
 ```bash
-$ diffsense examples/example_v1.py examples/example_v2.py
+export DIFFSENSE_OPENAI_API_KEY="your-api-key"
+diffsense file1 file2 --model openai
 ```
+Uses GPT-4o, the most advanced reasoning OpenAI model.
 
-<pre>
-┌──────────────────────── <b>Diff Analysis</b> ─────────────────────────┐
-│ <span style="color:#e74c3c"><b>---</b></span> example_v1.py <span style="color:#27ae60"><b>+++</b></span> example_v2.py                            │
-│ Blocks: 2 | Changes: 11                                        │
-└────────────────────────────────────────────────────────────────┘
+**Note**: Cloud models require `pip install diffsense[remote]`
 
-┌─────────────────────── <b>Block 1</b> (<span style="color:#27ae60">+3</span>, <span style="color:#e74c3c">-2</span>) ───────────────────────┐
-│ <span style="color:#3498db"><b>@@ -1,3 +1,4 @@</b></span>                                                │
-│   <span style="color:#95a5a6">1</span> <span style="color:#e74c3c">- def calculate_total(a, b):</span>                               │
-│   <span style="color:#95a5a6">2</span> <span style="color:#e74c3c">-     return a + b</span>                                         │
-│   <span style="color:#95a5a6">1</span> <span style="color:#27ae60">+ def calculate_total(a, b, fee=0):</span>                        │
-│   <span style="color:#95a5a6">2</span> <span style="color:#27ae60">+     subtotal = a + b</span>                                     │
-│   <span style="color:#95a5a6">3</span> <span style="color:#27ae60">+     return subtotal + fee</span>                                │
-│   <span style="color:#95a5a6">3</span>                                                            │
-└────────────────────────────────────────────────────────────────┘
+## Command Line Options
 
-┌─────────────────────── <b>Block 2</b> (<span style="color:#27ae60">+2</span>, <span style="color:#e74c3c">-2</span>) ───────────────────────┐
-│ <span style="color:#3498db"><b>@@ -3,3 +4,3 @@</b></span>                                                │
-│   <span style="color:#95a5a6">4</span>                                                            │
-│   <span style="color:#95a5a6">5</span> <span style="color:#e74c3c">- def print_receipt(total):</span>                                │
-│   <span style="color:#95a5a6">6</span> <span style="color:#e74c3c">-     print(f"Total: {total}")</span>                             │
-│   <span style="color:#95a5a6">5</span> <span style="color:#27ae60">+ def print_receipt(total, currency="$"):</span>                  │
-│   <span style="color:#95a5a6">6</span> <span style="color:#27ae60">+     print(f"{currency} {total}")</span>                         │
-└────────────────────────────────────────────────────────────────┘
+### Basic Options
+- `--no-ai` - Skip AI analysis, show only diff
+- `--context N` - Number of context lines (default: 3)
+- `--verbose` - Enable debug logging
+- `--version` - Show version
 
-┌─────────────────────────── <b>Summary</b> ───────────────────────────┐
-│ <span style="color:#27ae60">+ 3 insertions</span> <span style="color:#e74c3c">- 2 deletions</span> <span style="color:#f39c12">~ 0 modifications</span>                │
-└───────────────────────────────────────────────────────────────┘
+### Git Mode
+- `--git` - Enable Git mode for repository diffs
 
-<span style="color:#3498db">[19:32:46]</span> <span style="color:#2ecc71"><b>INFO</b></span>    Loading model: TheBloke/CodeLlama-7B-Instruct-GGUF
-<span style="color:#3498db">[19:32:49]</span> <span style="color:#2ecc71"><b>INFO</b></span>    Model loaded successfully
+### Model Options
+- `--model MODEL` - Choose AI model (local path or "anthropic"/"openai")
+- `--full-context` - Force full file context in analysis
 
-────────────────────────────────────────────────────────────────────
-<span style="color:#f1c40f"><b>AI Analysis:</b></span>
+## Context Management
 
-<b>PRIMARY CHANGE:</b>
-The most substantial change that introduces new functionality,
-logic, or architecture is the addition of a new parameter `fee`
-to the `calculate_total` function. This change allows for the 
-calculation of a fee to be added to the total, which was not
-possible before.
+DiffSense automatically optimizes context based on file size:
 
-<b>SECONDARY CHANGES:</b>
-The addition of the `fee` parameter also allows for the
-calculation of taxes and other fees that may be applicable to a
-transaction. Additionally, the `print_receipt` function now
-takes an additional parameter `currency` to specify the currency
-symbol to be used in the receipt.
+- **Small files** (<100 lines): Full context included
+- **Large files**: Smart context extraction around changes
+- **Force full**: Use `--full-context` flag
 
-<b>PURPOSE & IMPACT:</b>
-The purpose of these changes is to enable the calculation of
-fees and taxes in the receipt, and to allow for the use of
-different currencies in the receipt.
+## Performance Tuning
 
-<b>TECHNICAL BENEFITS:</b>
-The addition of the `fee` parameter and the `print_receipt`
-function with the `currency` parameter allow for more flexible
-and customizable receipts, which can be useful for different
-types of transactions and businesses.
+### Local Models
 
-<b>SUMMARY:</b>
-Classification: Feature
-Tag: Generic
-Complexity: Medium
-Risk: Medium
-</pre>
+The tool auto-detects hardware and optimizes accordingly:
 
-## Project structure
+| Platform | Optimization |
+|----------|-------------|
+| Apple Silicon | Metal GPU acceleration |
+| Linux + NVIDIA | CUDA acceleration |
+| Windows/Other | Optimized CPU threading |
 
-```
-diffsense/
-├── src/diffsense/
-│   ├── __init__.py              # Package initialization
-│   ├── cli.py                   # Command-line interface
-│   ├── diff_engine.py           # Core diff computation
-│   ├── formatter.py             # Rich text formatting
-│   ├── git_manager.py           # Git integration
-│   ├── llm_manager.py           # AI model management
-│   └── exceptions.py            # Custom exceptions
-├── tests/
-│   ├── test_cli.py              # CLI functionality tests
-│   ├── test_cli_git.py          # Git mode CLI tests
-│   ├── test_diff_engine.py      # Diff engine tests
-│   ├── test_formatter.py        # Formatter tests
-│   ├── test_git_manager.py      # Git manager tests
-│   └── test_llm_manager.py      # LLM manager tests
-├── examples/
-│   ├── example_v1.py            # Example file1
-│   └── example_v2.py            # Example file2
-├── models/                      # Local model cache
-├── pyproject.toml               # Project configuration
-├── README.md                    # This file
-└── .github/workflows/ci.yml     # CI/CD pipeline
-```
+### Memory Management
 
-## Development
+- **Low memory** (<8GB): Reduced context window
+- **High memory** (>16GB): Model locked in RAM
+- **Model cache**: Default `./models/` directory
 
-### Running Tests
-```bash
-# Run all tests
-pytest
+### API Rate Limits
 
-# Run with coverage
-pytest --cov=diffsense --cov-report=html
+Cloud models are subject to provider rate limits:
+- Anthropic: varies by plan
+- OpenAI: varies by tier
 
-# Run specific test categories
-pytest tests/test_diff_engine.py -v
-```
+### Token consumption
 
-### Adding new features
+In addition to the defined prompt, the token consumption is dependent on the size of the diff, especially in case of `--full-context` usage
 
-#### Extending the Diff Engine
-To add new diff algorithms or enhance change detection:
+## Environment Variables
 
-1. Modify `src/diffsense/diff_engine.py`
-2. Add corresponding tests in `tests/test_diff_engine.py`
-3. Update the `DiffEngine` class with new methods
-
-#### Enhancing AI analysis
-To improve prompt engineering or add new analysis patterns:
-
-1. Modify `_build_analysis_prompt()` in `src/diffsense/llm_manager.py`
-2. Add pattern recognition rules
-3. Test with various code change scenarios
-
-#### Adding output formats
-To support new output formats:
-
-1. Extend `src/diffsense/formatter.py`
-2. Add new formatting methods
-3. Update CLI options in `src/diffsense/cli.py`
-
-#### Extending Git integration
-To add new Git features:
-
-1. Modify `src/diffsense/git_manager.py`
-2. Add tests in `tests/test_git_manager.py`
-3. Update CLI in `src/diffsense/cli.py` if needed
-
-## Performance considerations
-
-### Model selection trade-offs
-- **CodeLlama-7B-Instruct**: fast, good for code analysis, 4GB RAM
-- **CodeLlama-13B-Instruct**: better analysis, slower, 8GB RAM
-- **Llama-2-7B-Chat**: general purpose, less code-specific
-
-### Hardware requirements
-- **Minimum**: 4GB RAM, CPU-only execution
-- **Recommended**: 8GB+ RAM, GPU acceleration
-- **Optimal**: 16GB+ RAM, modern GPU with 8GB+ VRAM
-
-### Context Management
-- Files < 80 lines: automatic full context
-- Larger files: smart context extraction
-- Custom context: use `--full-context` flag
+| Variable | Description |
+|----------|-------------|
+| `DIFFSENSE_ANTHROPIC_API_KEY` | Anthropic Anthropic API key |
+| `DIFFSENSE_OPENAI_API_KEY` | OpenAI API key |
 
 
-## Troubleshooting
+## Privacy & Security
 
-### Common Issues
+- **Local models**: all processing happens on your machine. No data leaves your system.
+- **Cloud models**: <ins>when using `--model anthropic` or `--model openai`, diffs are sent to respective APIs. Use according to your data policies.</ins> The default hardcoded models are `gpt-4o` (for OpenAI) and `claude-opus-4-20250514` (for Anthropic), at the moment the most advanced models to exploit the best-in-class analyzing capabilities.
 
-**Model download fails**
-```bash
-# Clear model cache and retry
-rm -rf models/
-diffsense file1 file2
-```
 
-**Out of memory errors**
-```bash
-# Use smaller model or reduce context
-diffsense file1 file2 --model smaller-model --context 1
-```
+## Development Transparency
 
-**Slow Performance**
-```bash
-# Check GPU acceleration
-diffsense file1 file2 --verbose
-
-# Use smaller context for large files
-diffsense file1 file2 --context 3
-```
-
-## Technical details
-
-### Architecture
-DiffSense employs a modular architecture with clear separation of concerns:
-
-- **Diff Engine**: implements advanced diff algorithms with inline change detection
-- **LLM Manager**: handles model lifecycle, hardware optimization, and prompt engineering  
-- **Git Manager**: provides Git integration to retrieve file diffs from commits data
-- **Formatter**: provides rich terminal output with syntax highlighting
-- **CLI**: offers comprehensive command-line interface with extensive options
-
-### Model integration
-The tool uses GGUF-format models via llama-cpp-python for efficient local execution. Models are automatically downloaded from HuggingFace and cached locally for subsequent use.
-
-### Privacy and security
-All processing occurs locally on your machine. No code or analysis results are transmitted to external services, ensuring complete privacy and security of your intellectual property.
+This project was developed with AI assistance throughout the entire development process. DiffSense was born from both a practical need for better code review tools and the curiosity to see AI in action while developing a complete project from scratch. The AI served as a coding assistant, helping with implementation, testing, and documentation while all architectural decisions and code quality remained under human oversight.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-- Built with [Rich](https://github.com/Textualize/rich) for beautiful terminal output
-- Powered by [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) for local LLM inference
-- CLI framework provided by [Typer](https://github.com/tiangolo/typer)
-- Models hosted on [HuggingFace](https://huggingface.co/)
-
-## Development transparency
-
-This project was developed with assistance from large language models for debugging, testing, and documentation tasks. All core architectural decisions, implementation logic, and final code quality remain under human oversight and validation. The use of AI tools accelerated development while maintaining high code quality standards and comprehensive test coverage.
+- Built with [Rich](https://github.com/Textualize/rich) for terminal output
+- Local models via [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
+- CLI powered by [Typer](https://github.com/tiangolo/typer)
