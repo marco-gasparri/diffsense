@@ -424,15 +424,23 @@ MANDATORY RULES:
                 }
             ]
 
-            # Delegate to provider
-            content = self._provider.generate(
+            # Delegate to provider - returns tuple (content, token_usage)
+            content, token_usage = self._provider.generate(
                 messages=messages,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature
             )
 
+            # Log token usage
+            total_tokens = token_usage.get("input", 0) + token_usage.get("output", 0)
+            logger.info(
+                f"Token usage - Input: {token_usage.get('input', 0)}, "
+                f"Output: {token_usage.get('output', 0)}, "
+                f"Total: {total_tokens}"
+            )
+
             logger.debug("Model inference completed successfully")
-            return content
+            return content  # Return only the content string, not the tuple
 
         except Exception as e:
             raise ModelError(f"Inference failed: {e}") from e

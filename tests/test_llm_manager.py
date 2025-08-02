@@ -365,7 +365,7 @@ class TestLLMManager:
         # Setup mock
         mock_provider_instance = Mock()
         mock_provider_instance.is_available.return_value = True
-        mock_provider_instance.generate.return_value = "Anthropic analysis"
+        mock_provider_instance.generate.return_value = ("Anthropic analysis", {"input": 100, "output": 50})
         mock_anthropic_provider.return_value = mock_provider_instance
 
         with patch.dict(os.environ, {"DIFFSENSE_ANTHROPIC_API_KEY": "test-key"}):
@@ -385,7 +385,7 @@ class TestLLMManager:
         # Setup mock
         mock_provider_instance = Mock()
         mock_provider_instance.is_available.return_value = True
-        mock_provider_instance.generate.return_value = "OpenAI analysis"
+        mock_provider_instance.generate.return_value = ("OpenAI analysis", {"input": 80, "output": 30})
         mock_openai_provider.return_value = mock_provider_instance
 
         with patch.dict(os.environ, {"DIFFSENSE_OPENAI_API_KEY": "test-key"}):

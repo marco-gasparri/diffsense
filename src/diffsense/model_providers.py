@@ -5,7 +5,7 @@ Model providers for different LLM backends
 import os
 import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import contextlib
 import io
 
@@ -23,7 +23,7 @@ class ModelProvider(ABC):
     """
 
     @abstractmethod
-    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> str:
+    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> Tuple[str, Dict[str, int]]:
         """
         Generate text from messages
 
@@ -32,7 +32,7 @@ class ModelProvider(ABC):
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
 
-        Returns the generated text response
+        Returns a tuple of (generated text, token usage dict with 'input' and 'output' keys)
         """
         pass
 
@@ -59,7 +59,7 @@ class LocalModelProvider(ModelProvider):
         """
         self.model_instance = model_instance
 
-    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> str:
+    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> Tuple[str, Dict[str, int]]:
         """Generate using local model via llama-cpp-python"""
         if self.model_instance is None:
             raise ModelError("Model not loaded")
@@ -84,8 +84,14 @@ class LocalModelProvider(ModelProvider):
             if not content:
                 raise ModelError("Model returned empty content")
 
+            # Extract token usage from response
+            token_usage = {
+                "input": response.get("usage", {}).get("prompt_tokens", 0),
+                "output": response.get("usage", {}).get("completion_tokens", 0)
+            }
+
             logger.debug("Local model inference completed successfully")
-            return content
+            return content, token_usage
 
         except Exception as e:
             raise ModelError(f"Local inference failed: {e}") from e
@@ -116,7 +122,7 @@ class AnthropicProvider(ModelProvider):
             except ImportError:
                 logger.warning("anthropic package not installed. Install with: pip install anthropic")
 
-    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> str:
+    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> Tuple[str, Dict[str, int]]:
         """Generate using Anthropic API"""
         if not self._client:
             raise ModelError("Anthropic client not initialized. Check API key and anthropic package installation.")
@@ -152,8 +158,14 @@ class AnthropicProvider(ModelProvider):
             if not content:
                 raise ModelError("Anthropic returned empty content")
 
+            # Extract token usage
+            token_usage = {
+                "input": response.usage.input_tokens,
+                "output": response.usage.output_tokens
+            }
+
             logger.debug("Anthropic API call completed successfully")
-            return content
+            return content, token_usage
 
         except Exception as e:
             raise ModelError(f"Anthropic API call failed: {e}") from e
@@ -184,7 +196,7 @@ class OpenAIProvider(ModelProvider):
             except ImportError:
                 logger.warning("openai package not installed. Install with: pip install openai")
 
-    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> str:
+    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> Tuple[str, Dict[str, int]]:
         """Generate using OpenAI API"""
         if not self._client:
             raise ModelError("OpenAI client not initialized. Check API key and openai package installation.")
@@ -205,8 +217,14 @@ class OpenAIProvider(ModelProvider):
             if not content:
                 raise ModelError("OpenAI returned empty content")
 
+            # Extract token usage
+            token_usage = {
+                "input": response.usage.prompt_tokens,
+                "output": response.usage.completion_tokens
+            }
+
             logger.debug("OpenAI API call completed successfully")
-            return content
+            return content, token_usage
 
         except Exception as e:
             raise ModelError(f"OpenAI API call failed: {e}") from e

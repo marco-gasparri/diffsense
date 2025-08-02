@@ -40,7 +40,11 @@ class TestLocalModelProvider:
         mock_model.create_chat_completion.return_value = {
             "choices": [{
                 "message": {"content": "Test response"}
-            }]
+            }],
+            "usage": {
+                "prompt_tokens": 50,
+                "completion_tokens": 20
+            }
         }
 
         provider = LocalModelProvider(mock_model)
@@ -49,9 +53,11 @@ class TestLocalModelProvider:
             {"role": "user", "content": "User prompt"}
         ]
 
-        result = provider.generate(messages, max_tokens=100, temperature=0.5)
+        result, token_usage = provider.generate(messages, max_tokens=100, temperature=0.5)
 
         assert result == "Test response"
+        assert token_usage["input"] == 50
+        assert token_usage["output"] == 20
         mock_model.create_chat_completion.assert_called_once()
 
         # Check call arguments
@@ -60,6 +66,24 @@ class TestLocalModelProvider:
         assert call_args.kwargs["max_tokens"] == 100
         assert call_args.kwargs["temperature"] == 0.5
         assert "stop" in call_args.kwargs
+
+    def test_generate_success_without_usage(self):
+        """Test successful generation without usage data"""
+        # Mock model response without usage
+        mock_model = Mock()
+        mock_model.create_chat_completion.return_value = {
+            "choices": [{
+                "message": {"content": "Test response"}
+            }]
+        }
+
+        provider = LocalModelProvider(mock_model)
+
+        result, token_usage = provider.generate([{"role": "user", "content": "test"}], 100, 0.5)
+
+        assert result == "Test response"
+        assert token_usage["input"] == 0
+        assert token_usage["output"] == 0
 
     def test_generate_empty_response(self):
         """Test handling of empty response"""
@@ -138,6 +162,8 @@ class TestAnthropicProvider:
         mock_client = Mock()
         mock_response = Mock()
         mock_response.content = [Mock(text="Anthropic response")]
+        mock_response.usage.input_tokens = 100
+        mock_response.usage.output_tokens = 50
         mock_client.messages.create.return_value = mock_response
         mock_anthropic.Anthropic.return_value = mock_client
 
@@ -150,9 +176,11 @@ class TestAnthropicProvider:
                     {"role": "user", "content": "User prompt"}
                 ]
 
-                result = provider.generate(messages, max_tokens=1000, temperature=0.7)
+                result, token_usage = provider.generate(messages, max_tokens=1000, temperature=0.7)
 
                 assert result == "Anthropic response"
+                assert token_usage["input"] == 100
+                assert token_usage["output"] == 50
 
                 # Check API call
                 mock_client.messages.create.assert_called_once()
@@ -224,6 +252,8 @@ class TestOpenAIProvider:
         mock_choice = Mock()
         mock_choice.message.content = "OpenAI response"
         mock_response.choices = [mock_choice]
+        mock_response.usage.prompt_tokens = 80
+        mock_response.usage.completion_tokens = 30
         mock_client.chat.completions.create.return_value = mock_response
         mock_openai.OpenAI.return_value = mock_client
 
@@ -236,9 +266,11 @@ class TestOpenAIProvider:
                     {"role": "user", "content": "User prompt"}
                 ]
 
-                result = provider.generate(messages, max_tokens=1000, temperature=0.7)
+                result, token_usage = provider.generate(messages, max_tokens=1000, temperature=0.7)
 
                 assert result == "OpenAI response"
+                assert token_usage["input"] == 80
+                assert token_usage["output"] == 30
 
                 # Check API call
                 mock_client.chat.completions.create.assert_called_once()
