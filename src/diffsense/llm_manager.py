@@ -7,7 +7,7 @@ import os
 import platform
 import logging
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import contextlib
 import io
 
@@ -19,6 +19,7 @@ from .diff_engine import DiffBlock
 from .formatter import DiffFormatter
 from .exceptions import ModelError
 from .model_providers import create_provider, ModelProvider
+from .conflict_resolver import ConflictSection, ConflictResolution, ConflictResolutionConfidence
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class LLMManager:
         self._model_instance: Optional[Llama] = None
         self._provider: Optional[ModelProvider] = None
         self._formatter = DiffFormatter()
+        self._last_token_usage = {"input": 0, "output": 0}  # Track last inference tokens
 
     def analyze_diff(
         self,
@@ -93,6 +95,48 @@ class LLMManager:
 
         except Exception as e:
             raise ModelError(f"Failed to analyze diff: {e}") from e
+
+    def resolve_conflict(
+        self,
+        conflict: ConflictSection,
+        file_context: Dict[str, Any],
+        additional_context: Optional[Dict[str, str]] = None,
+        file_path: str = "unknown"
+    ) -> Tuple[ConflictResolution, int]:
+        """
+        Generate an intelligent resolution for a merge conflict
+
+        Args:
+            conflict: The conflict section to resolve
+            file_context: Context about the file and conflicts
+            additional_context: Optional additional files for context
+            file_path: Path of the file being resolved
+
+        Returns the tuple of (ConflictResolution, token count)
+        """
+        try:
+            # Initialize provider if not already done
+            if self._provider is None:
+                self._initialize_provider()
+
+            # Build prompt for conflict resolution
+            prompt = self._build_conflict_resolution_prompt(
+                conflict, file_context, additional_context, file_path
+            )
+
+            # Run inference
+            response = self._run_inference(prompt)
+
+            # Parse response to extract resolution
+            resolution = self._parse_conflict_resolution(response, conflict)
+
+            # Get actual token count from last inference
+            token_count = self._last_token_usage.get("input", 0) + self._last_token_usage.get("output", 0)
+
+            return resolution, token_count
+
+        except Exception as e:
+            raise ModelError(f"Failed to resolve conflict: {e}") from e
 
     def _estimate_token_count(self, text: str) -> int:
         """
@@ -431,6 +475,9 @@ MANDATORY RULES:
                 temperature=self.temperature
             )
 
+            # Store token usage for later retrieval
+            self._last_token_usage = token_usage
+
             # Log token usage
             total_tokens = token_usage.get("input", 0) + token_usage.get("output", 0)
             logger.info(
@@ -474,3 +521,171 @@ MANDATORY RULES:
             info["provider"] = "local"
 
         return info
+
+    def _build_conflict_resolution_prompt(
+        self,
+        conflict: ConflictSection,
+        file_context: Dict[str, Any],
+        additional_context: Optional[Dict[str, str]] = None,
+        file_path: str = "unknown"
+    ) -> str:
+        """
+        Build a prompt for conflict resolution
+
+        Args:
+            conflict: The conflict section
+            file_context: File context information
+            additional_context: Additional context files
+            file_path: Path of the file
+
+        Returns the formatted prompt string
+        """
+        # Find the specific context for this conflict
+        conflict_idx = None
+        for i, ctx in enumerate(file_context.get("conflicts_context", [])):
+            if ctx["conflict_lines"] == f"{conflict.start_line}-{conflict.end_line}":
+                conflict_idx = i
+                break
+
+        conflict_context = file_context["conflicts_context"][conflict_idx] if conflict_idx is not None else {}
+
+        prompt = f"""You are resolving a Git merge conflict in {file_path}.
+
+FILE INFORMATION:
+- Language: {file_context.get('file_language', 'unknown')}
+- Total lines: {file_context.get('total_lines', 'unknown')}
+- Total conflicts in file: {file_context.get('total_conflicts', 'unknown')}
+- This is conflict {(conflict_idx + 1) if conflict_idx is not None else '?'} of {file_context.get('total_conflicts', '?')}
+
+CONFLICT DETAILS:
+- Lines {conflict.start_line}-{conflict.end_line}
+- Current branch: {conflict_context.get('current_branch_info', 'unknown')}
+- Incoming branch: {conflict_context.get('incoming_branch_info', 'unknown')}
+
+CONTEXT BEFORE CONFLICT:
+{conflict_context.get('context_before', '(no context)')}
+
+CURRENT VERSION (ours):
+{conflict.current_content}
+
+INCOMING VERSION (theirs):
+{conflict.incoming_content}
+
+CONTEXT AFTER CONFLICT:
+{conflict_context.get('context_after', '(no context)')}"""
+
+        # Add additional context if provided
+        if additional_context:
+            prompt += "\n\nADDITIONAL CONTEXT FILES:"
+            for path, content in additional_context.items():
+                # Limit each file to reasonable size in prompt
+                if len(content) > 2000:
+                    content = content[:2000] + "\n... (truncated)"
+                prompt += f"\n\n--- {path} ---\n{content}"
+
+        prompt += """
+
+TASK: Analyze this merge conflict and provide a resolution.
+
+RESPONSE FORMAT (YOU MUST USE EXACTLY THIS FORMAT):
+CONFIDENCE: [HIGH|MEDIUM|LOW]
+RESOLUTION:
+<your resolved code here: don't wrap the code in triple backticks or markdown, just output the plain code>
+END_RESOLUTION
+EXPLANATION: <brief explanation of why you chose this resolution>
+
+IF CONFIDENCE IS NOT HIGH, ALSO ADD:
+ALTERNATIVE_1:
+<alternative resolution>
+END_ALTERNATIVE
+ALTERNATIVE_EXPLANATION_1: <explanation for alternative>
+
+RESOLUTION GUIDELINES:
+1. If both changes are trying to achieve the same goal differently, prefer the cleaner implementation
+2. If changes are complementary (adding different features), try to merge both
+3. If one version has bugs or issues, prefer the correct version
+4. Consider the context and purpose of the code
+5. Maintain consistency with the surrounding code style
+6. If uncertain, mark confidence as MEDIUM or LOW and provide alternatives
+
+IMPORTANT: 
+- Do not include conflict markers (<<<<<<<, =======, >>>>>>>) in your resolution
+- Provide clean, working code
+- Keep explanations concise but informative"""
+
+        return prompt
+
+    def _parse_conflict_resolution(self, response: str, conflict: ConflictSection) -> ConflictResolution:
+        """
+        Parse AI response to extract conflict resolution
+        """
+        import re
+
+        # Extract confidence level
+        confidence_match = re.search(r'CONFIDENCE:\s*(HIGH|MEDIUM|LOW)', response, re.IGNORECASE)
+        if confidence_match:
+            confidence_str = confidence_match.group(1).upper()
+            confidence = ConflictResolutionConfidence(confidence_str.lower())
+        else:
+            # Default to low confidence if not specified
+            logger.warning("No confidence level found in response, defaulting to LOW")
+            confidence = ConflictResolutionConfidence.LOW
+
+        # Extract main resolution
+        resolution_match = re.search(
+            r'RESOLUTION:\s*\n(.*?)\nEND_RESOLUTION',
+            response,
+            re.DOTALL | re.IGNORECASE
+        )
+        if resolution_match:
+            resolved_content = resolution_match.group(1).strip()
+        else:
+            # Fallback: try to find any code block
+            logger.warning("No proper RESOLUTION block found, attempting fallback")
+            # Try to extract from first code block or reasonable content
+            lines = response.split('\n')
+            code_lines = []
+            in_code = False
+            for line in lines:
+                if line.strip().startswith('```'):
+                    in_code = not in_code
+                    continue
+                if in_code or (line and not line.startswith(('CONFIDENCE:', 'EXPLANATION:', 'ALTERNATIVE'))):
+                    code_lines.append(line)
+            resolved_content = '\n'.join(code_lines).strip()
+
+            if not resolved_content:
+                # Last resort: use incoming content
+                resolved_content = conflict.incoming_content
+                confidence = ConflictResolutionConfidence.LOW
+
+        # Extract explanation
+        explanation_match = re.search(
+            r'EXPLANATION:\s*(.+?)(?=(?:\nALTERNATIVE_|$))',
+            response,
+            re.DOTALL | re.IGNORECASE
+        )
+        explanation = explanation_match.group(1).strip() if explanation_match else "No explanation provided"
+
+        # Extract alternatives if confidence is not HIGH
+        alternatives = []
+        if confidence != ConflictResolutionConfidence.HIGH:
+            # Look for alternatives with more flexible pattern
+            alt_pattern = re.compile(
+                r'ALTERNATIVE_(\d+):\s*\n(.*?)(?:\n)?END_ALTERNATIVE.*?ALTERNATIVE_EXPLANATION_\1:\s*(.+?)(?=(?:\nALTERNATIVE_|$))',
+                re.DOTALL | re.IGNORECASE
+            )
+            for match in alt_pattern.finditer(response):
+                alt_num, alt_code, alt_explanation = match.groups()
+                alternatives.append({
+                    "resolution": alt_code.strip(),
+                    "explanation": alt_explanation.strip()
+                })
+
+        return ConflictResolution(
+            section=conflict,
+            resolved_content=resolved_content,
+            explanation=explanation,
+            confidence=confidence,
+            alternative_resolutions=alternatives if alternatives else None
+        )

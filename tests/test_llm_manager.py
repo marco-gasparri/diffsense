@@ -12,6 +12,7 @@ from diffsense.llm_manager import LLMManager
 from diffsense.diff_engine import DiffEngine
 from diffsense.exceptions import ModelError
 from diffsense.diff_engine import DiffBlock
+from diffsense.conflict_resolver import ConflictSection, ConflictResolution, ConflictResolutionConfidence
 
 
 class TestLLMManager:
@@ -398,3 +399,221 @@ class TestLLMManager:
             result = manager.analyze_diff(blocks)
             assert result == "OpenAI analysis"
             mock_provider_instance.generate.assert_called_once()
+
+    @patch('diffsense.model_providers.LocalModelProvider')
+    def test_resolve_conflict_success(self, mock_provider_class):
+        """Test successful conflict resolution"""
+        # Setup mock provider
+        mock_provider = Mock()
+        mock_provider.is_available.return_value = True
+        mock_provider.generate.return_value = (
+            "CONFIDENCE: HIGH\nRESOLUTION:\nresolved content\nEND_RESOLUTION\nEXPLANATION: Test explanation\n",
+            {"input": 200, "output": 100}
+        )
+        mock_provider_class.return_value = mock_provider
+
+        # Setup mock model
+        mock_model = Mock()
+        manager = LLMManager(cache_dir=self.temp_cache)
+        manager._model_instance = mock_model
+
+        # Create test conflict
+        conflict = ConflictSection(
+            start_line=1,
+            end_line=5,
+            current_content="current",
+            incoming_content="incoming",
+            current_marker="<<<<<<< HEAD",
+            incoming_marker=">>>>>>> branch",
+            separator_line=3
+        )
+
+        file_context = {
+            "file_language": "python",
+            "total_lines": 100,
+            "total_conflicts": 1,
+            "conflicts_context": [{
+                "conflict_lines": "1-5",
+                "context_before": "before",
+                "context_after": "after",
+                "current_branch_info": "HEAD",
+                "incoming_branch_info": "branch"
+            }]
+        }
+
+        resolution, tokens = manager.resolve_conflict(conflict, file_context)
+
+        assert isinstance(resolution, ConflictResolution)
+        assert resolution.resolved_content == "resolved content"
+        assert resolution.explanation == "Test explanation"
+        assert resolution.confidence == ConflictResolutionConfidence.HIGH
+        assert tokens == 300
+
+    @patch('diffsense.model_providers.LocalModelProvider')
+    def test_resolve_conflict_with_alternatives(self, mock_provider_class):
+        """Test conflict resolution with alternatives"""
+        # Setup mock provider with medium confidence response
+        mock_provider = Mock()
+        mock_provider.is_available.return_value = True
+        mock_provider.generate.return_value = (
+            """CONFIDENCE: MEDIUM
+RESOLUTION:
+main resolution
+END_RESOLUTION
+EXPLANATION: Main explanation
+ALTERNATIVE_1:
+alternative resolution
+END_ALTERNATIVE
+ALTERNATIVE_EXPLANATION_1: Alternative explanation
+""",
+            {"input": 250, "output": 150}
+        )
+        mock_provider_class.return_value = mock_provider
+
+        mock_model = Mock()
+        manager = LLMManager(cache_dir=self.temp_cache)
+        manager._model_instance = mock_model
+
+        conflict = ConflictSection(
+            start_line=1,
+            end_line=5,
+            current_content="current",
+            incoming_content="incoming",
+            current_marker="<<<<<<< HEAD",
+            incoming_marker=">>>>>>> branch",
+            separator_line=3
+        )
+
+        file_context = {"conflicts_context": [{"conflict_lines": "1-5"}]}
+
+        resolution, tokens = manager.resolve_conflict(conflict, file_context)
+
+        assert resolution.confidence == ConflictResolutionConfidence.MEDIUM
+        assert resolution.alternative_resolutions is not None
+        assert len(resolution.alternative_resolutions) == 1
+        assert resolution.alternative_resolutions[0]["resolution"] == "alternative resolution"
+
+    def test_build_conflict_resolution_prompt(self):
+        """Test building conflict resolution prompt"""
+        manager = LLMManager(cache_dir=self.temp_cache)
+
+        conflict = ConflictSection(
+            start_line=10,
+            end_line=15,
+            current_content="current code",
+            incoming_content="incoming code",
+            current_marker="<<<<<<< HEAD",
+            incoming_marker=">>>>>>> feature",
+            separator_line=12
+        )
+
+        file_context = {
+            "file_language": "python",
+            "total_lines": 200,
+            "total_conflicts": 2,
+            "conflicts_context": [
+                {"conflict_lines": "10-15", "context_before": "def func():", "context_after": "return"}
+            ]
+        }
+
+        prompt = manager._build_conflict_resolution_prompt(conflict, file_context)
+
+        assert "You are resolving a Git merge conflict" in prompt
+        assert "Language: python" in prompt
+        assert "current code" in prompt
+        assert "incoming code" in prompt
+        assert "def func():" in prompt
+        assert "CONFIDENCE: [HIGH|MEDIUM|LOW]" in prompt
+
+    def test_build_conflict_prompt_with_additional_context(self):
+        """Test building prompt with additional context files"""
+        manager = LLMManager(cache_dir=self.temp_cache)
+
+        conflict = Mock(start_line=1, end_line=5, current_content="", incoming_content="")
+        file_context = {"conflicts_context": [{"conflict_lines": "1-5"}]}
+        additional_context = {
+            "model.py": "class Model:\n    pass",
+            "utils.py": "def helper():\n    return True"
+        }
+
+        prompt = manager._build_conflict_resolution_prompt(
+            conflict, file_context, additional_context, "test.py"
+        )
+
+        assert "ADDITIONAL CONTEXT FILES:" in prompt
+        assert "--- model.py ---" in prompt
+        assert "class Model:" in prompt
+        assert "--- utils.py ---" in prompt
+
+    def test_parse_conflict_resolution_success(self):
+        """Test parsing well-formatted resolution response"""
+        manager = LLMManager(cache_dir=self.temp_cache)
+
+        response = """CONFIDENCE: HIGH
+RESOLUTION:
+def fixed_function():
+    return True
+END_RESOLUTION
+EXPLANATION: Fixed the function to return True
+"""
+
+        conflict = Mock()
+        resolution = manager._parse_conflict_resolution(response, conflict)
+
+        assert resolution.confidence == ConflictResolutionConfidence.HIGH
+        assert resolution.resolved_content == "def fixed_function():\n    return True"
+        assert resolution.explanation == "Fixed the function to return True"
+        assert resolution.alternative_resolutions is None
+
+    def test_parse_conflict_resolution_malformed(self):
+        """Test parsing malformed resolution response"""
+        manager = LLMManager(cache_dir=self.temp_cache)
+
+        response = """This is a malformed response without proper format.
+Just some text about the resolution."""
+
+        conflict = Mock(incoming_content="fallback content")
+        resolution = manager._parse_conflict_resolution(response, conflict)
+
+        # Should fallback gracefully
+        assert resolution.confidence == ConflictResolutionConfidence.LOW
+        assert resolution.explanation == "No explanation provided"
+
+    def test_parse_conflict_resolution_code_block_fallback(self):
+        """Test parsing with code block fallback"""
+        manager = LLMManager(cache_dir=self.temp_cache)
+
+        response = """CONFIDENCE: MEDIUM
+Here's the resolution:
+```python
+def resolved():
+    return 42
+```
+EXPLANATION: Returns the answer"""
+
+        conflict = Mock()
+        resolution = manager._parse_conflict_resolution(response, conflict)
+
+        assert "def resolved():" in resolution.resolved_content
+        assert "return 42" in resolution.resolved_content
+
+    def test_token_tracking_in_resolve_conflict(self):
+        """Test that token usage is properly tracked"""
+        manager = LLMManager(cache_dir=self.temp_cache)
+
+        # Mock provider that returns token usage
+        mock_provider = Mock()
+        mock_provider.generate.return_value = (
+            "CONFIDENCE: HIGH\nRESOLUTION:\ntest\nEND_RESOLUTION\nEXPLANATION: test",
+            {"input": 123, "output": 45}
+        )
+        manager._provider = mock_provider
+
+        conflict = Mock(start_line=1, end_line=2, current_content="", incoming_content="")
+        file_context = {"conflicts_context": [{"conflict_lines": "1-2"}]}
+
+        resolution, tokens = manager.resolve_conflict(conflict, file_context)
+
+        assert tokens == 168  # 123 + 45
+        assert manager._last_token_usage["input"] == 123
+        assert manager._last_token_usage["output"] == 45

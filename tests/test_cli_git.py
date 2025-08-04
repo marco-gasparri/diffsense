@@ -328,3 +328,150 @@ class TestCLIGitMode:
         # newfile.py will be shown as it's an untracked file
         assert "newfile.py" in result.stdout
         assert "To see changes for a specific file" in result.stdout
+
+
+class TestCLI:
+    """Test cases for CLI functionality (additional tests specific to Git integration)"""
+
+    def setup_method(self):
+        """Set up test fixtures"""
+        self.runner = CliRunner()
+        self.test_dir = Path("test_files")
+        self.test_dir.mkdir(exist_ok=True)
+
+    def teardown_method(self):
+        """Clean up test fixtures"""
+        import shutil
+        if self.test_dir.exists():
+            shutil.rmtree(self.test_dir)
+
+    def test_resolve_conflicts_mode(self):
+        """Test --resolve-conflicts mode"""
+        conflict_file = self.test_dir / "conflict.py"
+        conflict_file.write_text("""
+<<<<<<< HEAD
+    return 1
+=======
+    return 2
+>>>>>>> branch
+""")
+
+        with patch('diffsense.cli.LLMManager') as mock_llm:
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                # Mock the resolution properly
+                from diffsense.conflict_resolver import ConflictSection, ConflictResolution, ConflictResolutionConfidence
+
+                section = ConflictSection(
+                    start_line=2,
+                    end_line=6,
+                    current_content="    return 1",
+                    incoming_content="    return 2",
+                    current_marker="<<<<<<< HEAD",
+                    incoming_marker=">>>>>>> branch",
+                    separator_line=4
+                )
+
+                resolution = ConflictResolution(
+                    section=section,
+                    resolved_content="    return 2",
+                    explanation="Test explanation",
+                    confidence=ConflictResolutionConfidence.HIGH
+                )
+
+                mock_resolver.return_value.resolve_conflicts.return_value = (
+                    [resolution], 100
+                )
+
+                # Mock user confirmation as 'n' to avoid applying
+                with patch('typer.confirm', return_value=False):
+                    result = self.runner.invoke(app, [
+                        str(conflict_file),
+                        "--resolve-conflicts"
+                    ])
+
+                    assert result.exit_code == 0
+                    assert "Analyzing merge conflicts" in result.stdout
+                    assert "Found 1 conflict(s)" in result.stdout
+                    assert "Total tokens used: 100" in result.stdout
+
+    def test_resolve_conflicts_with_context_files(self):
+        """Test resolve conflicts with context files"""
+        conflict_file = self.test_dir / "conflict.py"
+        conflict_file.write_text("""
+<<<<<<< HEAD
+    return calculate(1)
+=======
+    return calculate(2)
+>>>>>>> branch
+""")
+
+        context_file = self.test_dir / "context.py"
+        context_file.write_text("def calculate(x): return x * 2")
+
+        with patch('diffsense.cli.LLMManager'):
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                mock_resolver.return_value.resolve_conflicts.return_value = ([], 0)
+
+                result = self.runner.invoke(app, [
+                    str(conflict_file),
+                    "--resolve-conflicts",
+                    "--context-file", str(context_file)
+                ])
+
+                # Verify context file was passed
+                mock_resolver.return_value.resolve_conflicts.assert_called_once()
+                call_args = mock_resolver.return_value.resolve_conflicts.call_args
+                assert call_args.args[0] == conflict_file
+                assert context_file in call_args.args[1]
+
+    @patch('diffsense.cli.typer.confirm')
+    def test_resolve_conflicts_apply_resolutions(self, mock_confirm):
+        """Test applying resolutions"""
+        import shutil
+        conflict_file = self.test_dir / "apply.py"
+        conflict_file.write_text("""<<<<<<< HEAD
+old
+=======
+new
+>>>>>>> branch""")
+
+        mock_confirm.return_value = True  # User confirms
+
+        with patch('diffsense.cli.LLMManager'):
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                with patch.object(shutil, 'copy2') as mock_copy:
+                    # Mock resolution properly
+                    from diffsense.conflict_resolver import ConflictSection, ConflictResolution, ConflictResolutionConfidence
+
+                    section = ConflictSection(
+                        start_line=1,
+                        end_line=5,
+                        current_content="old",
+                        incoming_content="new",
+                        current_marker="<<<<<<< HEAD",
+                        incoming_marker=">>>>>>> branch",
+                        separator_line=3
+                    )
+
+                    resolution = ConflictResolution(
+                        section=section,
+                        resolved_content="new",
+                        explanation="Prefer new version",
+                        confidence=ConflictResolutionConfidence.HIGH
+                    )
+
+                    mock_resolver.return_value.resolve_conflicts.return_value = (
+                        [resolution], 100
+                    )
+                    mock_resolver.return_value.apply_resolutions.return_value = "resolved"
+
+                    result = self.runner.invoke(app, [
+                        str(conflict_file),
+                        "--resolve-conflicts"
+                    ])
+
+                    assert result.exit_code == 0
+                    # Check backup was created
+                    mock_copy.assert_called_once()
+                    # Check resolutions were applied
+                    mock_resolver.return_value.apply_resolutions.assert_called_once()

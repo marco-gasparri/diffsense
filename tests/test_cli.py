@@ -11,6 +11,7 @@ from unittest.mock import patch, Mock, MagicMock
 
 from diffsense.cli import app
 from diffsense.exceptions import DiffSenseError
+from diffsense.conflict_resolver import ConflictResolution
 
 
 class TestCLI:
@@ -225,3 +226,207 @@ class TestCLI:
             # This is because the error is caught and handled gracefully
             assert result.exit_code == 0
             assert "Warning: AI analysis unavailable" in result.stdout
+
+    def test_resolve_conflicts_mode(self):
+        """Test --resolve-conflicts mode"""
+        conflict_file = self.test_dir / "conflict.py"
+        conflict_file.write_text("""
+<<<<<<< HEAD
+    return 1
+=======
+    return 2
+>>>>>>> branch
+""")
+
+        with patch('diffsense.cli.LLMManager') as mock_llm:
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                # Mock the resolution properly
+                from diffsense.conflict_resolver import ConflictSection, ConflictResolution, ConflictResolutionConfidence
+
+                section = ConflictSection(
+                    start_line=2,
+                    end_line=6,
+                    current_content="    return 1",
+                    incoming_content="    return 2",
+                    current_marker="<<<<<<< HEAD",
+                    incoming_marker=">>>>>>> branch",
+                    separator_line=4
+                )
+
+                resolution = ConflictResolution(
+                    section=section,
+                    resolved_content="    return 2",
+                    explanation="Test explanation",
+                    confidence=ConflictResolutionConfidence.HIGH
+                )
+
+                mock_resolver.return_value.resolve_conflicts.return_value = (
+                    [resolution], 100
+                )
+
+                # Mock user confirmation as 'n' to avoid applying
+                with patch('typer.confirm', return_value=False):
+                    result = self.runner.invoke(app, [
+                        str(conflict_file),
+                        "--resolve-conflicts"
+                    ])
+
+                    assert result.exit_code == 0
+                    assert "Analyzing merge conflicts" in result.stdout
+                    assert "Found 1 conflict(s)" in result.stdout
+                    assert "Total tokens used: 100" in result.stdout
+
+    def test_resolve_conflicts_no_file(self):
+        """Test resolve conflicts without file argument"""
+        result = self.runner.invoke(app, ["--resolve-conflicts"])
+        assert result.exit_code == 1
+
+    def test_resolve_conflicts_with_context_files(self):
+        """Test resolve conflicts with context files"""
+        conflict_file = self.test_dir / "conflict.py"
+        conflict_file.write_text("""
+<<<<<<< HEAD
+    return calculate(1)
+=======
+    return calculate(2)
+>>>>>>> branch
+""")
+
+        context_file = self.test_dir / "context.py"
+        context_file.write_text("def calculate(x): return x * 2")
+
+        with patch('diffsense.cli.LLMManager'):
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                mock_resolver.return_value.resolve_conflicts.return_value = ([], 0)
+
+                result = self.runner.invoke(app, [
+                    str(conflict_file),
+                    "--resolve-conflicts",
+                    "--context-file", str(context_file)
+                ])
+
+                # Verify context file was passed
+                mock_resolver.return_value.resolve_conflicts.assert_called_once()
+                call_args = mock_resolver.return_value.resolve_conflicts.call_args
+                assert call_args.args[0] == conflict_file
+                assert context_file in call_args.args[1]
+
+    def test_resolve_conflicts_multiple_context_files(self):
+        """Test resolve conflicts with multiple context files"""
+        conflict_file = self.test_dir / "conflict.py"
+        conflict_file.write_text("""<<<<<<< HEAD
+code1
+=======
+code2
+>>>>>>> branch""")
+
+        context1 = self.test_dir / "ctx1.py"
+        context2 = self.test_dir / "ctx2.py"
+        context1.write_text("# Context 1")
+        context2.write_text("# Context 2")
+
+        with patch('diffsense.cli.LLMManager'):
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                mock_resolver.return_value.resolve_conflicts.return_value = ([], 0)
+
+                result = self.runner.invoke(app, [
+                    str(conflict_file),
+                    "--resolve-conflicts",
+                    "--context-file", str(context1),
+                    "--context-file", str(context2)
+                ])
+
+                # Verify both context files were passed
+                call_args = mock_resolver.return_value.resolve_conflicts.call_args
+                context_files = call_args.args[1]
+                assert len(context_files) == 2
+                assert context1 in context_files
+                assert context2 in context_files
+
+    def test_resolve_conflicts_no_conflicts_found(self):
+        """Test resolve conflicts on file without conflicts"""
+        no_conflict_file = self.test_dir / "normal.py"
+        no_conflict_file.write_text("def func():\n    return 1")
+
+        with patch('diffsense.cli.LLMManager'):
+            result = self.runner.invoke(app, [
+                str(no_conflict_file),
+                "--resolve-conflicts"
+            ])
+
+            assert result.exit_code == 1
+
+    @patch('diffsense.cli.typer.confirm')
+    def test_resolve_conflicts_apply_resolutions(self, mock_confirm):
+        """Test applying resolutions"""
+        import shutil
+        conflict_file = self.test_dir / "apply.py"
+        conflict_file.write_text("""<<<<<<< HEAD
+old
+=======
+new
+>>>>>>> branch""")
+
+        mock_confirm.return_value = True  # User confirms
+
+        with patch('diffsense.cli.LLMManager'):
+            with patch('diffsense.cli.ConflictResolver') as mock_resolver:
+                with patch.object(shutil, 'copy2') as mock_copy:
+                    # Mock resolution properly
+                    from diffsense.conflict_resolver import ConflictSection, ConflictResolution, ConflictResolutionConfidence
+
+                    section = ConflictSection(
+                        start_line=1,
+                        end_line=5,
+                        current_content="old",
+                        incoming_content="new",
+                        current_marker="<<<<<<< HEAD",
+                        incoming_marker=">>>>>>> branch",
+                        separator_line=3
+                    )
+
+                    resolution = ConflictResolution(
+                        section=section,
+                        resolved_content="new",
+                        explanation="Prefer new version",
+                        confidence=ConflictResolutionConfidence.HIGH
+                    )
+
+                    mock_resolver.return_value.resolve_conflicts.return_value = (
+                        [resolution], 100
+                    )
+                    mock_resolver.return_value.apply_resolutions.return_value = "resolved"
+
+                    result = self.runner.invoke(app, [
+                        str(conflict_file),
+                        "--resolve-conflicts"
+                    ])
+
+                    assert result.exit_code == 0
+                    # Check backup was created
+                    mock_copy.assert_called_once()
+                    # Check resolutions were applied
+                    mock_resolver.return_value.apply_resolutions.assert_called_once()
+
+    def test_resolve_conflicts_with_git_mode_error(self):
+        """Test that resolve-conflicts and git mode cannot be used together"""
+        # Although not implemented in current code, this would be a good test
+        # to ensure mutual exclusivity if needed
+        pass
+
+    def test_format_confidence_display(self):
+        """Test confidence formatting in display"""
+        from diffsense.cli import _format_confidence
+        from diffsense.conflict_resolver import ConflictResolutionConfidence
+
+        high = _format_confidence(ConflictResolutionConfidence.HIGH)
+        assert "HIGH" in high
+        assert "green" in high
+
+        medium = _format_confidence(ConflictResolutionConfidence.MEDIUM)
+        assert "MEDIUM" in medium
+        assert "yellow" in medium
+
+        low = _format_confidence(ConflictResolutionConfidence.LOW)
+        assert "LOW" in low
+        assert "red" in low

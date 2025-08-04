@@ -16,6 +16,7 @@ from .llm_manager import LLMManager
 from .formatter import DiffFormatter
 from .git_manager import GitManager
 from .exceptions import DiffSenseError, GitError
+from .conflict_resolver import ConflictResolver
 
 # Configure logging
 logging.basicConfig(
@@ -74,6 +75,17 @@ def main(
         "-c",
         help="Number of context lines to show around changes"
     ),
+    resolve_conflicts: bool = typer.Option(
+        False,
+        "--resolve-conflicts",
+        help="Resolve merge conflicts in the file using AI"
+    ),
+    context_files: Optional[List[Path]] = typer.Option(
+        None,
+        "--context-file",
+        "-f",
+        help="Additional files to provide context for conflict resolution (can be used multiple times)"
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -94,7 +106,9 @@ def main(
         logger.debug("Verbose mode enabled")
 
     try:
-        if git:
+        if resolve_conflicts:
+            _handle_conflict_resolution_mode(file1, model, context_files, verbose)
+        elif git:
             _handle_git_mode(file1, file2, git_args, model, no_ai, full_context, context, verbose)
         else:
             _handle_file_mode(file1, file2, model, no_ai, full_context, context, verbose)
@@ -107,6 +121,185 @@ def main(
         if verbose:
             logger.exception("Full traceback:")
         raise typer.Exit(code=1)
+
+
+def _handle_conflict_resolution_mode(
+    file_path: Optional[Path],
+    model: Optional[str],
+    context_files: Optional[List[Path]],
+    verbose: bool
+) -> None:
+    """
+    Handle conflict resolution mode
+
+    Args:
+        file_path: Path to file with conflicts
+        model: Optional model override
+        context_files: Optional context files
+        verbose: Enable verbose output
+    """
+    if not file_path:
+        raise DiffSenseError("File path required for conflict resolution mode")
+
+    if not file_path.exists():
+        raise DiffSenseError(f"File does not exist: {file_path}")
+
+    if not file_path.is_file():
+        raise DiffSenseError(f"Path is not a file: {file_path}")
+
+    logger.debug(f"Resolving conflicts in: {file_path}")
+
+    # Initialize LLM manager
+    try:
+        llm_manager = LLMManager(model_id=model)
+    except Exception as e:
+        raise DiffSenseError(f"Failed to initialize AI model: {e}")
+
+    # Initialize conflict resolver
+    resolver = ConflictResolver(llm_manager)
+
+    # Resolve conflicts
+    console.print(f"\n[bold]Analyzing merge conflicts in {file_path}...[/bold]")
+
+    try:
+        resolutions, total_tokens = resolver.resolve_conflicts(file_path, context_files)
+
+        if not resolutions:
+            console.print("[green]No conflicts found in the file.[/green]")
+            return
+
+        # Display resolutions
+        console.print(f"\n[bold]Found {len(resolutions)} conflict(s)[/bold]")
+        console.print(f"[dim]Total tokens used: {total_tokens}[/dim]\n")
+
+        for i, resolution in enumerate(resolutions, 1):
+            _display_conflict_resolution(i, resolution)
+
+        # Ask user if they want to apply resolutions
+        if len(resolutions) == 1:
+            prompt_text = "\nApply this resolution? [Y/n]: "
+        else:
+            prompt_text = "\nApply all resolutions? [Y/n]: "
+
+        apply = typer.confirm(prompt_text, default=True)
+
+        if apply:
+            # Create backup
+            backup_path = Path(f"{file_path}.backup")
+            import shutil
+            shutil.copy2(file_path, backup_path)
+            console.print(f"[dim]Created backup: {backup_path}[/dim]")
+
+            # Apply resolutions
+            resolved_content = resolver.apply_resolutions(file_path, resolutions)
+            file_path.write_text(resolved_content, encoding='utf-8')
+            console.print(f"[green]✓ Resolutions applied to {file_path}[/green]")
+        else:
+            console.print("[yellow]Resolutions not applied.[/yellow]")
+
+    except Exception as e:
+        logger.error(f"Conflict resolution failed: {e}")
+        raise DiffSenseError(f"Failed to resolve conflicts: {e}")
+
+
+def _display_conflict_resolution(index: int, resolution) -> None:
+    """
+    Display a single conflict resolution
+
+    Args:
+        index: Conflict number
+        resolution: ConflictResolution object
+    """
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+    from rich.table import Table
+
+    # Create a table for the conflict info
+    info_table = Table.grid(padding=1)
+    info_table.add_column(style="bold")
+    info_table.add_column()
+
+    info_table.add_row(
+        "Conflict Location:",
+        f"Lines {resolution.section.start_line}-{resolution.section.end_line}"
+    )
+    info_table.add_row(
+        "Confidence:",
+        _format_confidence(resolution.confidence)
+    )
+
+    # Display current vs incoming
+    console.print(Panel(
+        info_table,
+        title=f"[bold]Conflict #{index}[/bold]",
+        border_style="blue"
+    ))
+
+    # Show the conflict versions side by side
+    conflict_table = Table(show_header=True, header_style="bold", show_lines=True)
+    conflict_table.add_column("Current Version (ours)", style="red")
+    conflict_table.add_column("Incoming Version (theirs)", style="green")
+
+    conflict_table.add_row(
+        resolution.section.current_content or "(empty)",
+        resolution.section.incoming_content or "(empty)"
+    )
+
+    console.print(conflict_table)
+
+    # Show resolution
+    console.print("\n[bold yellow]Proposed Resolution:[/bold yellow]")
+
+    # Try to detect language for syntax highlighting
+    lang = "python"  # Default, could be improved
+    if resolution.resolved_content:
+        syntax = Syntax(
+            resolution.resolved_content,
+            lang,
+            theme="monokai",
+            line_numbers=False
+        )
+        console.print(syntax)
+    else:
+        console.print("[dim](empty resolution)[/dim]")
+
+    # Show explanation
+    console.print(f"\n[bold]Explanation:[/bold] {resolution.explanation}")
+
+    # Show alternatives if any
+    if resolution.alternative_resolutions:
+        console.print("\n[bold yellow]Alternative Resolutions:[/bold yellow]")
+        for i, alt in enumerate(resolution.alternative_resolutions, 1):
+            console.print(f"\n[dim]Alternative {i}:[/dim]")
+            alt_syntax = Syntax(
+                alt["resolution"],
+                lang,
+                theme="monokai",
+                line_numbers=False
+            )
+            console.print(alt_syntax)
+            console.print(f"[dim]Rationale: {alt['explanation']}[/dim]")
+
+    console.print("─" * 80)
+
+
+def _format_confidence(confidence) -> str:
+    """
+    Format confidence level with color
+
+    Args:
+        confidence: ConflictResolutionConfidence enum
+
+    Returns the formatted string with color
+    """
+    from .conflict_resolver import ConflictResolutionConfidence
+
+    if confidence == ConflictResolutionConfidence.HIGH:
+        return "[bold green]HIGH[/bold green]"
+    elif confidence == ConflictResolutionConfidence.MEDIUM:
+        return "[bold yellow]MEDIUM[/bold yellow]"
+    else:
+        return "[bold red]LOW[/bold red]"
 
 
 def _handle_git_mode(
