@@ -175,6 +175,72 @@ class AnthropicProvider(ModelProvider):
         return bool(self.api_key and self._client)
 
 
+class GoogleProvider(ModelProvider):
+    """
+    Provider for Google GenAI API.
+    Requires DIFFSENSE_GOOGLE_API_KEY environment variable.
+    """
+
+    def __init__(self):
+        """Initialize Google provider with API key from environment"""
+        self.api_key = os.environ.get("DIFFSENSE_GOOGLE_API_KEY")
+        self._client = None
+
+        if self.api_key:
+            try:
+                from google import genai
+                self._client = genai.Client(api_key=self.api_key)
+                logger.debug("Google provider initialized using google-genai")
+            except ImportError:
+                logger.warning(
+                    "google-genai package not installed. Install with: pip install google-genai")
+
+    def generate(self, messages: List[Dict[str, str]], max_tokens: int, temperature: float) -> Tuple[
+        str, Dict[str, int]]:
+        """Generate using Google GenAI API"""
+        if not self._client:
+            raise ModelError(
+                "Google client not initialized. Check API key and google-genai package installation.")
+
+        from google.genai import types
+        logger.debug("Calling Google GenAI API")
+
+        try:
+
+            combined_prompt = "\n\n".join(f"{msg['role'].capitalize()}: {msg['content']}" for msg in messages)
+
+            model = 'gemini-2.5-pro'
+            response = self._client.models.generate_content(
+                model=model, # Hardcoded Google model
+                contents=combined_prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+            )
+
+            content = response.text.strip()
+
+            if not content:
+                raise ModelError("Google GenAI returned empty content")
+
+            token_usage = {
+                "input": response.usage_metadata.prompt_token_count,
+                "output": response.usage_metadata.candidates_token_count
+            }
+
+            logger.debug("Google GenAI API call completed successfully")
+            return content, token_usage
+
+        except Exception as e:
+            raise ModelError(f"Google GenAI API call failed: {e}") from e
+
+    def is_available(self) -> bool:
+        """Check if Google provider is properly configured"""
+        return bool(self.api_key and self._client)
+
+
+
 class OpenAIProvider(ModelProvider):
     """
     Provider for OpenAI API
@@ -259,7 +325,13 @@ def create_provider(model_id: str, model_instance=None) -> ModelProvider:
                 "OpenAI API key not found. Set DIFFSENSE_OPENAI_API_KEY environment variable."
             )
         return provider
-
+    elif model_id == "google":
+        provider = GoogleProvider()
+        if not provider.is_available():
+            raise ModelError(
+                "Google API key not found. Set DIFFSENSE_GOOGLE_API_KEY environment variable."
+            )
+        return provider
     else:
         # Local model provider
         if model_instance is None:

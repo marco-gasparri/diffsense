@@ -12,6 +12,7 @@ from diffsense.model_providers import (
     LocalModelProvider,
     AnthropicProvider,
     OpenAIProvider,
+    GoogleProvider,
     create_provider
 )
 from diffsense.exceptions import ModelError
@@ -304,6 +305,105 @@ class TestOpenAIProvider:
                     provider.generate([{"role": "user", "content": "test"}], 100, 0.5)
 
 
+class TestGoogleProvider:
+    """Test cases for GoogleProvider"""
+
+    def test_initialization_without_api_key(self):
+        """Test initialization without API key"""
+        with patch.dict(os.environ, {}, clear=True):
+            provider = GoogleProvider()
+
+            assert provider.api_key is None
+            assert provider._client is None
+            assert provider.is_available() is False
+
+    def test_initialization_with_api_key(self):
+        """Test initialization with API key"""
+        # Create mock for google.genai module structure
+        mock_genai = MagicMock()
+        mock_client = Mock()
+        mock_genai.Client.return_value = mock_client
+
+        # Mock the google module with genai as attribute
+        mock_google_module = MagicMock()
+        mock_google_module.genai = mock_genai
+
+        with patch.dict(os.environ, {"DIFFSENSE_GOOGLE_API_KEY": "test-key"}):
+            with patch.dict(sys.modules, {'google': mock_google_module, 'google.genai': mock_genai}):
+                provider = GoogleProvider()
+
+                assert provider.api_key == "test-key"
+                assert provider._client == mock_client
+                assert provider.is_available() is True
+                mock_genai.Client.assert_called_once_with(api_key="test-key")
+
+    def test_generate_success(self):
+        """Test successful generation"""
+        # Setup mock
+        mock_genai = MagicMock()
+        mock_types = MagicMock()
+        mock_genai.types = mock_types
+
+        mock_client = Mock()
+        mock_response = Mock()
+        mock_response.text = "Google response"
+        mock_response.usage_metadata.prompt_token_count = 10
+        mock_response.usage_metadata.candidates_token_count = 3
+        mock_client.models.generate_content.return_value = mock_response
+        mock_genai.Client.return_value = mock_client
+
+        # Mock the google module
+        mock_google_module = MagicMock()
+        mock_google_module.genai = mock_genai
+
+        with patch.dict(os.environ, {"DIFFSENSE_GOOGLE_API_KEY": "test-key"}):
+            with patch.dict(sys.modules, {'google': mock_google_module, 'google.genai': mock_genai}):
+                provider = GoogleProvider()
+
+                messages = [
+                    {"role": "system", "content": "System prompt"},
+                    {"role": "user", "content": "User prompt"}
+                ]
+
+                result, token_usage = provider.generate(messages, max_tokens=1000, temperature=0.7)
+
+                assert result == "Google response"
+                assert token_usage["input"] == 10
+                assert token_usage["output"] == 3
+
+                mock_client.models.generate_content.assert_called_once()
+                call_args = mock_client.models.generate_content.call_args
+                assert call_args.kwargs["model"] == "gemini-2.5-pro"
+
+    def test_generate_without_client(self):
+        """Test generation without initialized client"""
+        with patch.dict(os.environ, {}, clear=True):
+            provider = GoogleProvider()
+
+            with pytest.raises(ModelError, match="Google client not initialized"):
+                provider.generate([{"role": "user", "content": "test"}], 100, 0.5)
+
+    def test_generate_api_error(self):
+        """Test handling of API errors"""
+        mock_genai = MagicMock()
+        mock_types = MagicMock()
+        mock_genai.types = mock_types
+
+        mock_client = Mock()
+        mock_client.models.generate_content.side_effect = Exception("API error")
+        mock_genai.Client.return_value = mock_client
+
+        mock_google_module = MagicMock()
+        mock_google_module.genai = mock_genai
+
+        with patch.dict(os.environ, {"DIFFSENSE_GOOGLE_API_KEY": "test-key"}):
+            with patch.dict(sys.modules, {'google': mock_google_module, 'google.genai': mock_genai}):
+                provider = GoogleProvider()
+
+                with pytest.raises(ModelError, match="Google GenAI API call failed"):
+                    provider.generate([{"role": "user", "content": "test"}], 100, 0.5)
+
+
 class TestCreateProvider:
     """Test cases for create_provider factory function"""
 
@@ -353,3 +453,23 @@ class TestCreateProvider:
         """Test creating local provider without model instance"""
         with pytest.raises(ModelError, match="Local model instance required"):
             create_provider("some/local/model", None)
+
+    def test_create_google_provider_success(self):
+        """Test creating Google provider with API key"""
+        mock_genai = MagicMock()
+        mock_client = Mock()
+        mock_genai.Client.return_value = mock_client
+
+        mock_google_module = MagicMock()
+        mock_google_module.genai = mock_genai
+
+        with patch.dict(os.environ, {"DIFFSENSE_GOOGLE_API_KEY": "test-key"}):
+            with patch.dict(sys.modules, {'google': mock_google_module, 'google.genai': mock_genai}):
+                provider = create_provider("google")
+                assert isinstance(provider, GoogleProvider)
+
+    def test_create_google_provider_no_api_key(self):
+        """Test creating Google provider without API key"""
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ModelError, match="Google API key not found"):
+                create_provider("google")

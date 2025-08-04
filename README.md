@@ -37,6 +37,10 @@ diffsense file1 file2 --model anthropic
 # Use OpenAI API
 export DIFFSENSE_OPENAI_API_KEY="your-api-key"
 diffsense file1 file2 --model openai
+
+# Use Google API
+export DIFFSENSE_GOOGLE_API_KEY="your-api-key"
+diffsense file1 file2 --model google
 ```
 
 ## Features
@@ -101,12 +105,12 @@ diffsense --resolve-conflicts conflicted_file --model anthropic
 ```
 
 The conflict resolver:
-- analyzes both versions of conflicted code
-- provides resolution with confidence levels (HIGH/MEDIUM/LOW)
-- suggests alternatives when confidence is not high
-- adds explanatory comments in the resolved code
-- shows token usage for cost tracking
-- can apply changes to the original file creating automatic backups
+- Analyzes both versions of conflicted code
+- Provides resolution with confidence levels (HIGH/MEDIUM/LOW)
+- Suggests alternatives when confidence is not high
+- Adds explanatory comments in the resolved code
+- Shows token usage for cost tracking
+- Creates automatic backups before applying changes
 
 ### Model selection: local models (default)
 
@@ -146,6 +150,13 @@ diffsense file1 file2 --model openai
 ```
 Uses GPT-4o, the most advanced reasoning OpenAI model.
 
+#### Google
+```bash
+export DIFFSENSE_GOOGLE_API_KEY="your-api-key"
+diffsense file1 file2 --model google
+```
+Uses Gemini 2.5 Pro, Google's latest and most capable model.
+
 **Note**: Cloud models require `pip install diffsense[remote]`
 
 ## Command Line Options
@@ -160,7 +171,7 @@ Uses GPT-4o, the most advanced reasoning OpenAI model.
 - `--git` - Enable Git mode for repository diffs
 
 ### Model Options
-- `--model MODEL` - Choose AI model (local path or "anthropic"/"openai")
+- `--model MODEL` - Choose AI model (local path or "anthropic"/"openai"/"google")
 - `--full-context` - Force full file context in analysis
 
 ### Conflict Resolution
@@ -198,6 +209,7 @@ The tool auto-detects hardware and optimizes accordingly:
 Cloud models are subject to provider rate limits:
 - Anthropic: varies by plan
 - OpenAI: varies by tier
+- Google: varies by project quotas
 
 ### Token consumption
 
@@ -212,17 +224,19 @@ Token usage is reported for all operations:
 |----------|-------------|
 | `DIFFSENSE_ANTHROPIC_API_KEY` | Anthropic API key |
 | `DIFFSENSE_OPENAI_API_KEY` | OpenAI API key |
+| `DIFFSENSE_GOOGLE_API_KEY` | Google API key |
 
 ## Privacy & Security
 
 - **Local models**: all processing happens on your machine. No data leaves your system.
-- **Cloud models**: <ins>when using `--model anthropic` or `--model openai`, diffs are sent to respective APIs. Use according to your data policies.</ins> 
+- **Cloud models**: <ins>when using `--model anthropic`, `--model openai` or `--model google`, diffs are sent to respective APIs. Use according to your data policies.</ins> 
 
 ## Default models
 The default hardcoded models:
 - `TheBloke/CodeLlama-7B-Instruct-GGUF` as default model
 - `gpt-4o` for the option `--model openai`
 - `claude-opus-4-20250514` for the option `--model anthropic`
+- `gemini-2.5-pro` for the option `--model google`
 
 Suggestion: if there are ~30GB of available RAM, use `TheBloke/Phind-CodeLlama-34B-v2-GGUF` instead of the default model
 

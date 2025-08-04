@@ -150,7 +150,7 @@ class LLMManager:
         Initialize the appropriate model provider based on model_id
         """
         # Check if it's a remote model
-        if self.model_id in ["anthropic", "openai"]:
+        if self.model_id in ["anthropic", "openai", "google"]:
             logger.info(f"Initializing {self.model_id} provider")
             self._provider = create_provider(self.model_id)
         else:
@@ -514,7 +514,7 @@ MANDATORY RULES:
         }
 
         # Add provider-specific info
-        if self.model_id in ["anthropic", "openai"]:
+        if self.model_id in ["anthropic", "openai", "google"]:
             info["provider"] = self.model_id
             info["api_key_set"] = bool(os.environ.get(f"DIFFSENSE_{self.model_id.upper()}_API_KEY"))
         else:
